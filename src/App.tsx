@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Camera,
-  Database,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  FileSearch,
   FileSpreadsheet,
   Pause,
   Play,
@@ -18,7 +20,6 @@ import {
 import { PeriodAverageAccuracyHero } from './components/PeriodAverageAccuracyHero';
 import { Top10ErrorSection } from './components/Top10ErrorSection';
 import { TransactionBreakdownPanel } from './components/TransactionBreakdownPanel';
-import { StockCardPhotoAnalyzer } from './components/StockCardPhotoAnalyzer';
 import { SpreadsheetMatrixTable } from './components/SpreadsheetMatrixTable';
 import { SpreadsheetSyncModal } from './components/SpreadsheetSyncModal';
 import { SystemMutationMasterModal } from './components/SystemMutationMasterModal';
@@ -28,23 +29,30 @@ import {
   SystemMutationRecord,
 } from './types/inventory';
 
+type MainMenuOption = 'dashboard_report' | 'analisa';
+
 export default function App() {
+  // 2 Opsi Menu Utama: 'dashboard_report' | 'analisa'
+  const [activeMenu, setActiveMenu] = useState<MainMenuOption>('dashboard_report');
+
   const [csvData, setCsvData] = useState<string>(INITIAL_SPREADSHEET_CSV);
   const [sheetUrl, setSheetUrl] = useState<string>('');
   const [startDay, setStartDay] = useState<number>(1);
   const [endDay, setEndDay] = useState<number>(7);
 
-  // Top 10 is hidden by default ("Opsi Hide - Hanya Muncul Jika di klik")
-  const [isTop10Open, setIsTop10Open] = useState<boolean>(false);
+  // Top 10 tetap aktifkan mode Hide (Default: false / hanya muncul jika diklik)
+  const [isTop10OpenDashboard, setIsTop10OpenDashboard] = useState<boolean>(false);
+  const [isTop10OpenAnalisa, setIsTop10OpenAnalisa] = useState<boolean>(false);
+  const [showMatrixInDashboard, setShowMatrixInDashboard] = useState<boolean>(false);
 
-  // Master Data Histori Mutasi By Sistem state
+  // Rekap Mutasi Sistem & Kartu Stock dikosongkan ulang secara default (Hanya terisi jika ada Upload)
   const [systemMutations, setSystemMutations] = useState<SystemMutationRecord[]>(
     INITIAL_SYSTEM_MUTATION_MASTER
   );
   const [isMutationModalOpen, setIsMutationModalOpen] = useState<boolean>(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
 
-  // Optional Uploaded / Analyzed Foto Kartu Stok state
+  // Data Kartu Stock Opsional (Kosong secara default kecuali diupload)
   const [stockCards, setStockCards] = useState<AnalyzedStockCard[]>(
     INITIAL_SAMPLE_STOCK_CARDS
   );
@@ -65,20 +73,18 @@ export default function App() {
     [parsed, startDay, endDay]
   );
 
-  // Selected item for detailed historical breakdown
+  // Hanya tampilkan analisa untuk item yang di-search (Default: '' / null sampai user melakukan search atau klik item)
   const [selectedItemId, setSelectedItemId] = useState<string>('');
 
-  const selectedPeriodItem: PeriodItemAnalysis = useMemo(() => {
-    if (selectedItemId) {
-      const found = periodData.periodItems.find((p) => p.item.id === selectedItemId);
-      if (found) return found;
-    }
-    return (
-      periodData.periodItems.find((p) => p.item.name === 'Dus Besar') ||
-      periodData.periodItems.find((p) => p.item.name === 'Beef Patty Small') ||
-      periodData.periodItems[0]
-    );
+  const selectedPeriodItem: PeriodItemAnalysis | null = useMemo(() => {
+    if (!selectedItemId) return null;
+    return periodData.periodItems.find((p) => p.item.id === selectedItemId) || null;
   }, [periodData.periodItems, selectedItemId]);
+
+  const availableItemNames = useMemo(
+    () => periodData.periodItems.map((p) => p.item.name),
+    [periodData.periodItems]
+  );
 
   const triggerRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -117,12 +123,15 @@ export default function App() {
     return () => clearInterval(timer);
   }, [autoRefreshEnabled, triggerRefresh]);
 
-  const handleSelectItemAnalysis = (p: PeriodItemAnalysis) => {
+  const handleSelectItemAndOpenAnalisa = (p: PeriodItemAnalysis) => {
     setSelectedItemId(p.item.id);
-    const el = document.getElementById('item-historical-analysis');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    setActiveMenu('analisa');
+    setTimeout(() => {
+      const el = document.getElementById('item-historical-analysis');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 50);
   };
 
   const handleUpdateMutationMaster = (
@@ -134,70 +143,72 @@ export default function App() {
 
   const handleSaveStockCard = (card: AnalyzedStockCard) => {
     setStockCards((prev) => {
-      const exists = prev.some((c) => c.id === card.id);
+      const exists = prev.some(
+        (c) =>
+          c.id === card.id ||
+          c.itemName.toLowerCase().trim() === card.itemName.toLowerCase().trim()
+      );
       if (exists) {
-        return prev.map((c) => (c.id === card.id ? card : c));
+        return prev.map((c) =>
+          c.id === card.id ||
+          c.itemName.toLowerCase().trim() === card.itemName.toLowerCase().trim()
+            ? card
+            : c
+        );
       }
       return [card, ...prev];
     });
   };
 
-  const handleDeleteStockCard = (id: string) => {
-    setStockCards((prev) => prev.filter((c) => c.id !== id));
-  };
-
-  const handleJumpToStockCard = () => {
-    const el = document.getElementById('stock-card-photo-menu');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+  const handleClearAllUploads = () => {
+    setSystemMutations([]);
+    setStockCards([]);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Bar Contract: 3 Zones with Simplified Menu Titles */}
-      <header className="sticky top-0 z-40 flex items-center justify-between px-6 py-3.5 bg-slate-950/95 backdrop-blur border-b border-slate-800">
-        {/* Zone 1: Brand Wordmark */}
-        <a href="#top-rata-rata" className="text-lg font-bold tracking-tight text-slate-100">
-          Bangor Inventory
-        </a>
+      {/* Top Bar Contract: Ringkas Menjadi 2 Opsi Menu Besar (1. Dashboard Report | 2. Analisa) */}
+      <header className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 bg-slate-950/95 backdrop-blur border-b border-slate-800">
+        {/* Zone 1: Brand Title */}
+        <div className="flex items-center gap-3">
+          <span className="text-lg font-bold tracking-tight text-slate-100">
+            Bangor Inventory
+          </span>
+        </div>
 
-        {/* Zone 2: Simplified Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
-          <a
-            href="#top-rata-rata"
-            className="hover:text-slate-100 transition-colors whitespace-nowrap"
+        {/* Zone 2: 2 OPSI BESAR MENU UTAMA (Dashboard Report & Analisa) */}
+        <nav
+          aria-label="Menu Utama"
+          className="flex items-center gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl"
+        >
+          <button
+            type="button"
+            onClick={() => setActiveMenu('dashboard_report')}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${
+              activeMenu === 'dashboard_report'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/70'
+            }`}
           >
-            Akurasi
-          </a>
-          <a
-            href="#top10-lowest-accuracy"
-            onClick={() => setIsTop10Open(true)}
-            className="hover:text-slate-100 transition-colors whitespace-nowrap"
+            <BarChart3 className="w-4 h-4" />
+            <span>Dashboard Report</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveMenu('analisa')}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${
+              activeMenu === 'analisa'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/70'
+            }`}
           >
-            Top 10
-          </a>
-          <a
-            href="#item-historical-analysis"
-            className="hover:text-slate-100 transition-colors whitespace-nowrap"
-          >
-            Analisa Item
-          </a>
-          <a
-            href="#stock-card-photo-menu"
-            className="hover:text-slate-100 transition-colors whitespace-nowrap"
-          >
-            Kartu Stok
-          </a>
-          <a
-            href="#spreadsheet-matrix"
-            className="hover:text-slate-100 transition-colors whitespace-nowrap"
-          >
-            Tabel SO
-          </a>
+            <FileSearch className="w-4 h-4" />
+            <span>Analisa</span>
+          </button>
         </nav>
 
-        {/* Zone 3: 2 Primary Actions */}
+        {/* Zone 3: Real-time 30s Auto-Update & Upload Mutasi */}
         <div className="flex items-center gap-2.5">
           <button
             type="button"
@@ -225,28 +236,25 @@ export default function App() {
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-lg transition-colors whitespace-nowrap"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Mutasi Sistem</span>
+            <span>Upload Mutasi</span>
           </button>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main
-        id="top-rata-rata"
-        className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-6 space-y-6"
-      >
-        {/* Status Strip */}
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-6 space-y-6">
+        {/* Compact Status & Period Info Strip */}
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-emerald-400 font-semibold">Baseline: 100%</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono tabular-nums">
-              Update: {lastUpdated.toLocaleTimeString('id-ID')} (#{syncCycleCount})
+              Auto-Update: {lastUpdated.toLocaleTimeString('id-ID')} (#{syncCycleCount})
             </span>
             <span aria-hidden="true">·</span>
-            <span>Mutasi Sistem: {systemMutations.length} Baris</span>
-            <span aria-hidden="true">·</span>
-            <span>Kartu Stok: {stockCards.length} Item</span>
+            <span>
+              Rekap Mutasi: {systemMutations.length} Baris · Kartu Stock: {stockCards.length}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -262,14 +270,6 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={handleJumpToStockCard}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-lg transition-colors"
-            >
-              <Camera className="w-3.5 h-3.5 text-amber-400" />
-              <span>Foto Kartu Stok</span>
-            </button>
-            <button
-              type="button"
               onClick={() => setIsSyncModalOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-lg transition-colors"
             >
@@ -279,104 +279,130 @@ export default function App() {
           </div>
         </div>
 
-        {/* 1. Rata-Rata Akurasi + Bubble Menu Analisa */}
-        <PeriodAverageAccuracyHero
-          startDay={periodData.startDay}
-          endDay={periodData.endDay}
-          onChangeRange={(s, e) => {
-            setStartDay(s);
-            setEndDay(e);
-          }}
-          averagePeriodAccuracy={periodData.averagePeriodAccuracy}
-          weightedPeriodAccuracy={periodData.weightedPeriodAccuracy}
-          periodWape={periodData.periodWape}
-          periodTotalFisik={periodData.periodTotalFisik}
-          periodTotalError={periodData.periodTotalError}
-          gapFromBaseline100={periodData.gapFromBaseline100}
-          lowestDaySummary={periodData.lowestDaySummary}
-          highestDaySummary={periodData.highestDaySummary}
-          periodSummaries={periodData.periodSummaries}
-          periodItems={periodData.periodItems}
-          onSelectItemAnalysis={handleSelectItemAnalysis}
-        />
+        {/* ===================================================================== */}
+        {/* OPSI MENU 1: DASHBOARD REPORT (Hasil Analisa, Persentase & Top 10)     */}
+        {/* ===================================================================== */}
+        {activeMenu === 'dashboard_report' && (
+          <div className="space-y-6">
+            {/* 1. Persentase Akurasi & Hasil Analisa Rata-Rata */}
+            <PeriodAverageAccuracyHero
+              startDay={periodData.startDay}
+              endDay={periodData.endDay}
+              onChangeRange={(s, e) => {
+                setStartDay(s);
+                setEndDay(e);
+              }}
+              averagePeriodAccuracy={periodData.averagePeriodAccuracy}
+              weightedPeriodAccuracy={periodData.weightedPeriodAccuracy}
+              periodWape={periodData.periodWape}
+              periodTotalFisik={periodData.periodTotalFisik}
+              periodTotalError={periodData.periodTotalError}
+              gapFromBaseline100={periodData.gapFromBaseline100}
+              lowestDaySummary={periodData.lowestDaySummary}
+              highestDaySummary={periodData.highestDaySummary}
+              periodSummaries={periodData.periodSummaries}
+              periodItems={periodData.periodItems}
+              onSelectItemAnalysis={handleSelectItemAndOpenAnalisa}
+            />
 
-        {/* 2. Top 10 Akurasi Terendah (Default Hidden / Opsi Hide - Hanya Muncul Jika Di-klik) */}
-        <Top10ErrorSection
-          periodItems={periodData.periodItems}
-          startDay={periodData.startDay}
-          endDay={periodData.endDay}
-          selectedItemId={selectedPeriodItem.item.id}
-          onSelectItemAnalysis={handleSelectItemAnalysis}
-          systemMutations={systemMutations}
-          stockCards={stockCards}
-          isOpen={isTop10Open}
-          onToggleOpen={() => setIsTop10Open((prev) => !prev)}
-        />
+            {/* 2. Top 10 (Mode Hide Aktif - Hanya Muncul Jika Diklik) */}
+            <Top10ErrorSection
+              periodItems={periodData.periodItems}
+              startDay={periodData.startDay}
+              endDay={periodData.endDay}
+              selectedItemId={selectedPeriodItem?.item.id || ''}
+              onSelectItemAnalysis={handleSelectItemAndOpenAnalisa}
+              systemMutations={systemMutations}
+              stockCards={stockCards}
+              isOpen={isTop10OpenDashboard}
+              onToggleOpen={() => setIsTop10OpenDashboard((prev) => !prev)}
+            />
 
-        {/* 3. Analisa Item (Hasil Banding Mutasi pada Tanggal Selisih + Rekomendasi Pengecekan) */}
-        <TransactionBreakdownPanel
-          selectedAnalysis={selectedPeriodItem}
-          allPeriodItems={periodData.periodItems.filter(
-            (p) => p.periodSelisih > 0 || p.periodSO > 0
-          )}
-          startDay={periodData.startDay}
-          endDay={periodData.endDay}
-          onSelectItemAnalysis={(p) => setSelectedItemId(p.item.id)}
-          systemMutations={systemMutations}
-          stockCards={stockCards}
-          onOpenMutationUploadModal={() => setIsMutationModalOpen(true)}
-          onJumpToStockCard={handleJumpToStockCard}
-        />
+            {/* 3. Opsi Buka Tabel Rekap SO & Akurasi Bawah */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border border-slate-800 bg-slate-900/60 rounded-xl px-5 py-3.5">
+                <span className="text-xs font-semibold text-slate-300">
+                  Tabel Rekap Spreadsheet SO vs Accurate (1–7 Oktober)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowMatrixInDashboard((v) => !v)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
+                >
+                  <span>{showMatrixInDashboard ? 'Sembunyikan Tabel' : 'Tampilkan Tabel SO'}</span>
+                  {showMatrixInDashboard ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
 
-        {/* 4. Menu Opsional Upload Foto Kartu Stok & Banding Historical Tracking */}
-        <StockCardPhotoAnalyzer
-          stockCards={stockCards}
-          onSaveStockCard={handleSaveStockCard}
-          onDeleteStockCard={handleDeleteStockCard}
-          periodItems={periodData.periodItems}
-          selectedItem={selectedPeriodItem}
-          onSelectItemAnalysis={(p) => setSelectedItemId(p.item.id)}
-          systemMutations={systemMutations}
-        />
-
-        {/* 5. Master Mutasi Sistem Banner */}
-        <section
-          id="master-mutation-banner"
-          className="border border-sky-500/40 bg-slate-900/80 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4"
-        >
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-sky-400">
-              <Database className="w-4 h-4" />
-              <span>Master Data Mutasi Sistem</span>
+              {showMatrixInDashboard && (
+                <SpreadsheetMatrixTable
+                  items={parsed.items}
+                  dailySummaries={parsed.dailySummaries}
+                  selectedItemId={selectedPeriodItem?.item.id || ''}
+                  onSelectItem={(item) => {
+                    const found = periodData.periodItems.find((p) => p.item.id === item.id);
+                    if (found) handleSelectItemAndOpenAnalisa(found);
+                  }}
+                />
+              )}
             </div>
-            <h2 className="text-base font-bold text-slate-100">
-              Upload Mutasi Sistem ({systemMutations.length} Transaksi Aktif)
-            </h2>
-            <p className="text-xs text-slate-300 max-w-3xl">
-              Unggah file Excel/CSV mutasi sistem Accurate untuk dijadikan Master Data pembanding otomatis pada setiap tanggal selisih.
-            </p>
           </div>
+        )}
 
-          <button
-            type="button"
-            onClick={() => setIsMutationModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl transition-colors whitespace-nowrap self-start lg:self-center"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Upload Mutasi Sistem</span>
-          </button>
-        </section>
+        {/* ===================================================================== */}
+        {/* OPSI MENU 2: ANALISA                                                  */}
+        {/* Berisi:                                                               */}
+        {/* - Top 10 (Tetap Aktifkan Mode Hide)                                   */}
+        {/* - Opsi Pilihan Tanggal & Nama Item                                    */}
+        {/* - Kolom Upload Mutasi (Tanggal | Nomor | Deksripsi | Masuk | Keluar)  */}
+        {/* - Kolom Upload Kartu Stock Opsional                                   */}
+        {/* - Kolom Hasil Analisa (Hanya untuk Item yang di-Search)               */}
+        {/* ===================================================================== */}
+        {activeMenu === 'analisa' && (
+          <div className="space-y-6">
+            {/* 1. Top 10 (Tetap aktifkan mode Hide - Hanya muncul jika diklik) */}
+            <Top10ErrorSection
+              periodItems={periodData.periodItems}
+              startDay={periodData.startDay}
+              endDay={periodData.endDay}
+              selectedItemId={selectedPeriodItem?.item.id || ''}
+              onSelectItemAnalysis={(p) => {
+                setSelectedItemId(p.item.id);
+                const el = document.getElementById('item-historical-analysis');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              systemMutations={systemMutations}
+              stockCards={stockCards}
+              isOpen={isTop10OpenAnalisa}
+              onToggleOpen={() => setIsTop10OpenAnalisa((prev) => !prev)}
+            />
 
-        {/* 6. Tabel SO & Akurasi */}
-        <SpreadsheetMatrixTable
-          items={parsed.items}
-          dailySummaries={parsed.dailySummaries}
-          selectedItemId={selectedPeriodItem.item.id}
-          onSelectItem={(item) => {
-            const found = periodData.periodItems.find((p) => p.item.id === item.id);
-            if (found) handleSelectItemAnalysis(found);
-          }}
-        />
+            {/* 2. Pilihan Tanggal & Nama Item + Kolom Upload Mutasi + Kolom Upload Kartu Stock + Hasil Analisa Hanya Item Search */}
+            <TransactionBreakdownPanel
+              selectedAnalysis={selectedPeriodItem}
+              allPeriodItems={periodData.periodItems.filter(
+                (p) => p.periodSelisih > 0 || p.periodSO > 0
+              )}
+              startDay={periodData.startDay}
+              endDay={periodData.endDay}
+              onChangeRange={(s, e) => {
+                setStartDay(s);
+                setEndDay(e);
+              }}
+              onSelectItemAnalysis={(p) => setSelectedItemId(p ? p.item.id : '')}
+              systemMutations={systemMutations}
+              onUpdateMutationRecords={handleUpdateMutationMaster}
+              stockCards={stockCards}
+              onSaveStockCard={handleSaveStockCard}
+              onClearAllUploads={handleClearAllUploads}
+              onOpenMutationUploadModal={() => setIsMutationModalOpen(true)}
+            />
+          </div>
+        )}
       </main>
 
       {/* Footer */}
@@ -385,12 +411,15 @@ export default function App() {
         <span>Auto-Update 30s · Periode: {startDay}–{endDay} Okt</span>
       </footer>
 
-      {/* Modal 1: Upload Mutasi Sistem */}
+      {/* Modal 1: Upload Master Mutasi Barang (5 Kolom Horizontal) */}
       <SystemMutationMasterModal
         isOpen={isMutationModalOpen}
         onClose={() => setIsMutationModalOpen(false)}
         records={systemMutations}
         onUpdateRecords={handleUpdateMutationMaster}
+        defaultTargetItem={selectedPeriodItem?.item.name || 'Semua Item'}
+        defaultDay={selectedPeriodItem?.lowestAccuracyDayRecord?.day || 5}
+        availableItemNames={availableItemNames}
       />
 
       {/* Modal 2: Data SO */}

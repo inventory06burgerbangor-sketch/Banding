@@ -342,9 +342,12 @@ export const Top10ErrorSection: React.FC<Top10LowestAccuracyProps> = ({
                                     }`}
                                   >
                                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex flex-wrap items-center gap-2">
                                         <span className="font-bold text-slate-100">
                                           Tanggal Selisih: {vc.dateLabel} 2026
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded bg-slate-800 text-rose-300 font-medium">
+                                          Tipe: {vc.varianceTypeLabel}
                                         </span>
                                         {vc.isLowestAccuracyDay && (
                                           <span className="text-[10px] font-bold bg-rose-500 text-white px-1.5 py-0.5 rounded">
@@ -353,19 +356,19 @@ export const Top10ErrorSection: React.FC<Top10LowestAccuracyProps> = ({
                                         )}
                                       </div>
                                       <span className="font-mono text-amber-300 font-semibold">
-                                        Qty Selisih: {vc.qtySelisih.toLocaleString('id-ID')} {item.uom}
+                                        Jumlah Selisih: {vc.qtySelisih.toLocaleString('id-ID')} {item.uom}
                                       </span>
                                     </div>
 
                                     <p className="text-xs text-slate-200 mt-2 leading-relaxed">
-                                      <strong className="text-sky-300">Hasil Analisa History Mutasi:</strong>{' '}
-                                      {vc.mutationComparisonResult}
+                                      <strong className="text-amber-300">Potensi Selisih:</strong>{' '}
+                                      {vc.potentialDiscrepancyFinding}
                                     </p>
 
                                     <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-start gap-1.5 text-xs text-emerald-300">
                                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-400" />
                                       <span>
-                                        <strong>Rekomendasi Pengecekan:</strong> {vc.checkRecommendation}
+                                        <strong>Rekomendasi Penyelesaian:</strong> {vc.checkRecommendation}
                                       </span>
                                     </div>
                                   </div>

@@ -712,325 +712,21 @@ export function computePeriodDashboardAnalysis(
   };
 }
 
-// Initial Master Data Histori Mutasi By Sistem (Derived from Oktober Accurate movements, replaceable via Upload)
-export const INITIAL_SYSTEM_MUTATION_MASTER: SystemMutationRecord[] = [
-  {
-    id: 'mut-1',
-    date: '02 Okt 2026',
-    dayNumber: 2,
-    itemName: 'Butter',
-    transactionNo: 'DO.2026.10.00142',
-    transactionType: 'Delivery Order / Pengeluaran Gudang',
-    qtyIn: 0,
-    qtyOut: 2481,
-    balanceAfter: 1658,
-    uom: 'Pack',
-    warehouse: 'Gudang Utama Bangor',
-    description: 'Pengeluaran sistem -2.481 Pack di Accurate, fisik gudang belum keluar (memicu selisih 2.480 Pack)',
-  },
-  {
-    id: 'mut-2',
-    date: '03 Okt 2026',
-    dayNumber: 3,
-    itemName: 'Tray Kentang',
-    transactionNo: 'SJ.2026.10.00319',
-    transactionType: 'Surat Jalan Belum Posting Accurate',
-    qtyIn: 0,
-    qtyOut: 6000,
-    balanceAfter: 154200,
-    uom: 'Pcs',
-    warehouse: 'Gudang Packaging',
-    description: 'Fisik keluar 6.000 Pcs (6 bal) di SO (148.200), namun saldo Accurate masih 154.200 Pcs',
-  },
-  {
-    id: 'mut-3',
-    date: '03 Okt 2026',
-    dayNumber: 3,
-    itemName: 'Beef Patty Small',
-    transactionNo: 'RI.2026.10.00088',
-    transactionType: 'Receive Item (Penerimaan Barang)',
-    qtyIn: 330,
-    qtyOut: 0,
-    balanceAfter: 2065,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 1',
-    description: 'Penerimaan sistem +330 Pack di Accurate (1.735 -> 2.065), fisik SO hanya bertambah +85 Pack',
-  },
-  {
-    id: 'mut-4',
-    date: '03 Okt 2026',
-    dayNumber: 3,
-    itemName: 'Smoke Beef Slice',
-    transactionNo: 'RI.2026.10.00091',
-    transactionType: 'Receive Item & Selisih Cut-Off DO',
-    qtyIn: 48,
-    qtyOut: 0,
-    balanceAfter: 1860,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 1',
-    description: 'Sistem naik +48 Pack (1.812 -> 1.860), sedangkan fisik keluar -286 Pack (1.817 -> 1.531)',
-  },
-  {
-    id: 'mut-5',
-    date: '05 Okt 2026',
-    dayNumber: 5,
-    itemName: 'Dus Besar',
-    transactionNo: 'RI.2026.10.00210',
-    transactionType: 'Mutasi Masuk Sistem vs Pengeluaran Fisik',
-    qtyIn: 242,
-    qtyOut: 0,
-    balanceAfter: 2905,
-    uom: 'Pcs',
-    warehouse: 'Gudang Packaging',
-    description: 'Accurate naik +242 Pcs (2.663 -> 2.905) sementara fisik SO keluar -1.583 Pcs (2.696 -> 1.113)',
-  },
-  {
-    id: 'mut-6',
-    date: '05 Okt 2026',
-    dayNumber: 5,
-    itemName: 'Keju Slice Non Brand',
-    transactionNo: 'RI.2026.10.00215',
-    transactionType: 'Receive Item (Barang Masuk)',
-    qtyIn: 1500,
-    qtyOut: 0,
-    balanceAfter: 1501,
-    uom: 'Pack',
-    warehouse: 'Chiller Gudang',
-    description: 'Barang masuk +1.500 Pack klop antara SO Fisik (1.501) dan Accurate (1.501)',
-  },
-  {
-    id: 'mut-7',
-    date: '06 Okt 2026',
-    dayNumber: 6,
-    itemName: 'Beef Patty Large',
-    transactionNo: 'DO.2026.10.00412',
-    transactionType: 'Delivery Order (Pengeluaran Sistem)',
-    qtyIn: 0,
-    qtyOut: 593,
-    balanceAfter: 1153,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 1',
-    description: 'Accurate memotong -593 Pack (1.746 -> 1.153), sedangkan fisik SO justru naik ke 1.678 Pack',
-  },
-  {
-    id: 'mut-8',
-    date: '06 Okt 2026',
-    dayNumber: 6,
-    itemName: 'Kertas Thermal',
-    transactionNo: 'RI.2026.10.00249',
-    transactionType: 'Receive Item (Penutup Saldo Minus)',
-    qtyIn: 147,
-    qtyOut: 0,
-    balanceAfter: 134,
-    uom: 'Pack',
-    warehouse: 'Gudang Operasional',
-    description: 'Penerimaan +147 Pack menutup saldo sistem minus (-13 Pack -> +134 Pack), selisih tetap 30 Pack',
-  },
-  {
-    id: 'mut-9',
-    date: '07 Okt 2026',
-    dayNumber: 7,
-    itemName: 'Beef Patty Small',
-    transactionNo: 'DO.2026.10.00501',
-    transactionType: 'Pengeluaran Harian Accurate (SO Belum Input)',
-    qtyIn: 0,
-    qtyOut: 450,
-    balanceAfter: 2439,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 1',
-    description: 'Mutasi sistem Accurate (-450 Pack menjadi 2.439), namun kolom SO 7 Okt masih 0',
-  },
-  {
-    id: 'mut-10',
-    date: '06 Okt 2026',
-    dayNumber: 6,
-    itemName: 'Dus Besar',
-    transactionNo: 'RI.2026.10.00288',
-    transactionType: 'Receive Item & Selisih DO Gantung',
-    qtyIn: 317,
-    qtyOut: 0,
-    balanceAfter: 3222,
-    uom: 'Pcs',
-    warehouse: 'Gudang Packaging',
-    description: 'Accurate bertambah +317 Pcs (2.905 -> 3.222), sedangkan fisik SO naik +233 Pcs (1.113 -> 1.346), selisih melebar ke 1.876 Pcs',
-  },
-  {
-    id: 'mut-11',
-    date: '05 Okt 2026',
-    dayNumber: 5,
-    itemName: 'Beef Patty Small',
-    transactionNo: 'DO.2026.10.00355',
-    transactionType: 'Delivery Order (Pengeluaran Cabang)',
-    qtyIn: 0,
-    qtyOut: 174,
-    balanceAfter: 1891,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 1',
-    description: 'Accurate potong -174 Pack (2.065 -> 1.891), fisik SO keluar -184 Pack (1.682 -> 1.498), selisih naik ke 393 Pack',
-  },
-  {
-    id: 'mut-12',
-    date: '06 Okt 2026',
-    dayNumber: 6,
-    itemName: 'Ayam Crispy',
-    transactionNo: 'RI.2026.10.00302',
-    transactionType: 'Receive Item (Barang Masuk Belum Masuk Fisik SO)',
-    qtyIn: 560,
-    qtyOut: 0,
-    balanceAfter: 1518,
-    uom: 'Pack',
-    warehouse: 'Cold Storage 2',
-    description: 'Sistem Accurate mencatat RI +560 Pack (saldo 1.518), namun SO fisik tercatat 1.272 Pack (selisih 246 Pack)',
-  },
-];
+// Kosongkan Ulang Rekap Mutasi Sistem & Kartu Stock secara default (Hanya terisi jika ada Upload)
+export const INITIAL_SYSTEM_MUTATION_MASTER: SystemMutationRecord[] = [];
 
-// Initial Sample Kartu Stok Fisik (Opsional untuk Banding Historical Tracking)
-export const INITIAL_SAMPLE_STOCK_CARDS: AnalyzedStockCard[] = [
-  {
-    id: 'sc-dus-besar',
-    itemName: 'Dus Besar',
-    uom: 'Pcs',
-    uploadedAt: '07 Okt 2026, 08:15',
-    summaryAnalysis:
-      'Kartu Stok fisik Gudang Packaging mencatat pengeluaran 1.583 Pcs pada 5 Okt (SJ Manual #044) yang sudah mengurangi stok fisik ke 1.113 Pcs, namun dokumen SJ tersebut belum diinput sebagai Delivery Order di Accurate.',
-    anomaliesFound: [
-      '05 Okt: Pengeluaran fisik 1.583 Pcs tertulis di Kartu Stok (SJ Manual #044), tetapi di sistem Accurate justru hanya ada RI masuk +242 Pcs tanpa pemotongan DO.',
-      '07 Okt: Kartu Stok mencatat saldo akhir 1.206 Pcs, namun lembar rekap SO belum diinput (masih 0).',
-    ],
-    entries: [
-      {
-        id: 'sce-1',
-        date: '01 Okt 2026',
-        dayNumber: 1,
-        docNo: 'SALDO-AWAL',
-        qtyIn: 0,
-        qtyOut: 120,
-        balance: 3001,
-        notes: 'Sesuai fisik rak A2',
-      },
-      {
-        id: 'sce-2',
-        date: '02 Okt 2026',
-        dayNumber: 2,
-        docNo: 'SJ-10/019',
-        qtyIn: 0,
-        qtyOut: 95,
-        balance: 2906,
-        notes: 'Kirim outlet',
-      },
-      {
-        id: 'sce-3',
-        date: '03 Okt 2026',
-        dayNumber: 3,
-        docNo: 'SJ-10/028',
-        qtyIn: 0,
-        qtyOut: 210,
-        balance: 2696,
-        notes: 'Klop fisik',
-      },
-      {
-        id: 'sce-4',
-        date: '05 Okt 2026',
-        dayNumber: 5,
-        docNo: 'SJ-MANUAL-044',
-        qtyIn: 0,
-        qtyOut: 1583,
-        balance: 1113,
-        notes: 'Kirim partai besar cabang (Belum input Accurate)',
-      },
-      {
-        id: 'sce-5',
-        date: '06 Okt 2026',
-        dayNumber: 6,
-        docNo: 'RI-10/288',
-        qtyIn: 233,
-        qtyOut: 0,
-        balance: 1346,
-        notes: 'Terima parsial',
-      },
-      {
-        id: 'sce-6',
-        date: '07 Okt 2026',
-        dayNumber: 7,
-        docNo: 'SJ-10/071',
-        qtyIn: 0,
-        qtyOut: 140,
-        balance: 1206,
-        notes: 'Kartu stok terisi 1.206 Pcs, form SO belum disalin',
-      },
-    ],
-  },
-  {
-    id: 'sc-butter',
-    itemName: 'Butter',
-    uom: 'Pack',
-    uploadedAt: '07 Okt 2026, 08:20',
-    summaryAnalysis:
-      'Kartu Stok fisik Butter pada 2 Okt menunjukkan saldo fisik tetap 4.138 Pack (hanya keluar 1 Pack), membuktikan pemotongan sistem Accurate -2.481 Pack adalah salah potong dokumen di sistem.',
-    anomaliesFound: [
-      '02 Okt: Kartu Stok fisik mencatat sisa 4.138 Pack, sedangkan sistem Accurate memotong DO.2026.10.00142 sebesar 2.481 Pack.',
-      '03–06 Okt: Kartu Stok fisik mencatat 3.750 Pack vs Accurate 3.300 Pack (selisih 450 Pack gantung).',
-    ],
-    entries: [
-      {
-        id: 'sce-b1',
-        date: '01 Okt 2026',
-        dayNumber: 1,
-        docNo: 'OPNAME-01',
-        qtyIn: 0,
-        qtyOut: 0,
-        balance: 4138,
-        notes: 'Klop',
-      },
-      {
-        id: 'sce-b2',
-        date: '02 Okt 2026',
-        dayNumber: 2,
-        docNo: 'TANPA-MUTASI',
-        qtyIn: 0,
-        qtyOut: 0,
-        balance: 4138,
-        notes: 'Fisik masih utuh di chiller (Sistem salah potong 2.481)',
-      },
-      {
-        id: 'sce-b3',
-        date: '03 Okt 2026',
-        dayNumber: 3,
-        docNo: 'SJ-10/031',
-        qtyIn: 0,
-        qtyOut: 388,
-        balance: 3750,
-        notes: 'Keluar fisik 388 Pack',
-      },
-      {
-        id: 'sce-b4',
-        date: '05 Okt 2026',
-        dayNumber: 5,
-        docNo: 'OPNAME-05',
-        qtyIn: 0,
-        qtyOut: 0,
-        balance: 3750,
-        notes: 'Tetap 3.750 Pack',
-      },
-      {
-        id: 'sce-b5',
-        date: '06 Okt 2026',
-        dayNumber: 6,
-        docNo: 'OPNAME-06',
-        qtyIn: 0,
-        qtyOut: 0,
-        balance: 3750,
-        notes: 'Tetap 3.750 Pack',
-      },
-    ],
-  },
-];
+export const INITIAL_SAMPLE_STOCK_CARDS: AnalyzedStockCard[] = [];
 
-// Logika Analisa Hasil Banding: Cari tahu History Mutasi pada Tanggal Selisih + Kartu Stok + Rekomendasi Pengecekan
+// Logika Analisa Hasil Banding Based On Search Item:
+// - Tanggal Selisih, Jumlah Selisih, dan Tipe Selisih
+// - Dibanding dengan Data Mutasi (Tanggal | Nomor | Deksripsi | Masuk | Keluar) & Kartu Stock (jika ada upload di tgl tersebut)
+// - Temukan Potensi Selisih berdasar Analisa Tanggal, Jenis Transaksi, dan Jumlah
+// - Rekomendasi Penyelesaian
 export function buildVarianceDateMutationComparisons(
   periodItem: PeriodItemAnalysis,
   systemMutations: SystemMutationRecord[],
-  stockCards: AnalyzedStockCard[]
+  stockCards: AnalyzedStockCard[],
+  specificDayFilter: number | 'ALL' = 'ALL'
 ): VarianceDateMutationComparison[] {
   const { item, periodDaily } = periodItem;
 
@@ -1042,68 +738,64 @@ export function buildVarianceDateMutationComparisons(
       item.name.toLowerCase().includes(sc.itemName.toLowerCase())
   );
 
-  // Filter variance dates in the selected period (where selisih > 0 or accuracy < 100%, excluding holiday day 4)
-  const varianceDays = periodDaily.filter(
-    (d) => d.day !== 4 && (d.selisih > 0 || (d.dailyAccuracyPercent ?? 100) < 100)
-  );
+  // Filter dates in the selected period:
+  // If specificDayFilter is a specific day (e.g. 5), include that day so the user sees its analysis;
+  // otherwise include all variance dates (selisih > 0 or accuracy < 100%, excluding holiday day 4)
+  const targetDays = periodDaily.filter((d) => {
+    if (d.day === 4) return false;
+    if (specificDayFilter !== 'ALL') {
+      return d.day === specificDayFilter;
+    }
+    return d.selisih > 0 || (d.dailyAccuracyPercent ?? 100) < 100;
+  });
 
-  return varianceDays
+  return targetDays
     .map((d) => {
-      // 1. Find explicit system mutations on this date
-      const explicitMutations = systemMutations.filter(
-        (m) =>
-          m.dayNumber === d.day &&
-          (m.itemName.toLowerCase().trim() === item.name.toLowerCase().trim() ||
-            m.itemName.toLowerCase().includes(item.name.toLowerCase()) ||
-            item.name.toLowerCase().includes(m.itemName.toLowerCase()))
-      );
+      // 1. Determine Tipe Selisih (varianceDirection & varianceTypeLabel)
+      const soVal = d.so ?? 0;
+      const accVal = d.accurate ?? 0;
+      let varianceDirection: VarianceDateMutationComparison['varianceDirection'] = 'FISIK_KURANG';
+      let varianceTypeLabel = 'Selisih Kurang Fisik (SO < Sistem)';
 
-      // If no uploaded record exists yet for this date, synthesize from deltaAccurate so every variance date has complete mutation tracking
-      const matchedSystemMutations: SystemMutationRecord[] =
-        explicitMutations.length > 0
-          ? explicitMutations
-          : [
-              {
-                id: `auto-mut-${item.id}-${d.day}`,
-                date: `${String(d.day).padStart(2, '0')} Okt 2026`,
-                dayNumber: d.day,
-                itemName: item.name,
-                transactionNo:
-                  d.deltaAccurate !== null && d.deltaAccurate > 0
-                    ? `RI.AUTO.10.0${d.day}`
-                    : d.deltaAccurate !== null && d.deltaAccurate < 0
-                    ? `DO.AUTO.10.0${d.day}`
-                    : `SALDO.SYS.10.0${d.day}`,
-                transactionType:
-                  d.deltaAccurate !== null && d.deltaAccurate > 0
-                    ? 'Mutasi Masuk Accurate (Delta Sistem)'
-                    : d.deltaAccurate !== null && d.deltaAccurate < 0
-                    ? 'Mutasi Keluar Accurate (Delta Sistem)'
-                    : 'Saldo Sistem Tanpa Pergerakan Harian',
-                qtyIn: d.deltaAccurate !== null && d.deltaAccurate > 0 ? d.deltaAccurate : 0,
-                qtyOut:
-                  d.deltaAccurate !== null && d.deltaAccurate < 0
-                    ? Math.abs(d.deltaAccurate)
-                    : 0,
-                balanceAfter: d.accurate,
-                uom: item.uom,
-                warehouse: 'Gudang Utama',
-                description:
-                  d.deltaAccurate !== null
-                    ? `Perubahan saldo sistem Accurate ${
-                        d.deltaAccurate >= 0 ? '+' : ''
-                      }${d.deltaAccurate.toLocaleString('id-ID')} ${item.uom} vs mutasi fisik SO ${
-                        d.deltaSO !== null
-                          ? `${d.deltaSO >= 0 ? '+' : ''}${d.deltaSO.toLocaleString('id-ID')}`
-                          : '0'
-                      } ${item.uom}`
-                    : `Saldo sistem ${
-                        d.accurate !== null ? d.accurate.toLocaleString('id-ID') : 'Kosong'
-                      } vs fisik SO ${d.so !== null ? d.so.toLocaleString('id-ID') : '0'}`,
-              },
-            ];
+      if (d.selisih === 0 && (d.dailyAccuracyPercent ?? 100) === 100) {
+        varianceDirection = 'SEIMBANG';
+        varianceTypeLabel = 'Tidak Ada Selisih (Klop 100%)';
+      } else if (d.day === 7 && (d.so === 0 || d.so === null) && accVal > 0) {
+        varianceDirection = 'SO_BELUM_INPUT';
+        varianceTypeLabel = 'Cut-Off SO Belum Input (SO = 0 vs Sistem Aktif)';
+      } else if (d.accurate !== null && d.accurate < 0) {
+        varianceDirection = 'SISTEM_MINUS';
+        varianceTypeLabel = 'Stok Sistem Minus (Negative Inventory)';
+      } else if ((d.so === 0 || d.so === null) && accVal > 0) {
+        varianceDirection = 'FISIK_KURANG';
+        varianceTypeLabel = 'Selisih Formula / SO Kosong (SO = 0, Sistem Ada Saldo)';
+      } else if (soVal > 0 && d.accurate === null) {
+        varianceDirection = 'FISIK_LEBIH';
+        varianceTypeLabel = 'Data Sistem Kosong (Fisik Ada, Sistem Tidak Tertarik)';
+      } else if (soVal > accVal) {
+        varianceDirection = 'FISIK_LEBIH';
+        varianceTypeLabel = 'Selisih Lebih Fisik (SO Fisik > Stok Sistem)';
+      } else if (soVal < accVal) {
+        varianceDirection = 'FISIK_KURANG';
+        varianceTypeLabel = 'Selisih Kurang Fisik (SO Fisik < Stok Sistem)';
+      }
 
-      // 2. Match stock card entries on this date (if Kartu Stok is uploaded/available)
+      // 2. Hanya ambil Data Mutasi yang benar-benar diupload untuk item & tanggal tersebut (Tanpa data dummy otomatis)
+      const matchedSystemMutations = systemMutations.filter((m) => {
+        if (m.dayNumber !== d.day) return false;
+        const mItem = m.itemName.toLowerCase().trim();
+        const tItem = item.name.toLowerCase().trim();
+        const mDesc = m.description.toLowerCase();
+        return (
+          mItem === 'semua item' ||
+          mItem === tItem ||
+          mItem.includes(tItem) ||
+          tItem.includes(mItem) ||
+          mDesc.includes(tItem)
+        );
+      });
+
+      // 3. Hanya ambil Kartu Stock yang benar-benar diupload untuk item & tanggal tersebut
       const matchedStockCardEntries: StockCardEntry[] = matchedCard
         ? matchedCard.entries.filter((e) => e.dayNumber === d.day)
         : [];
@@ -1119,89 +811,137 @@ export function buildVarianceDateMutationComparisons(
           ? d.accurate - stockCardBalance
           : null;
 
-      // 3. Build "Hasil Analisa Banding History Mutasi pada Tanggal Selisih" & "Rekomendasi Pengecekan"
+      // 4. Analisa Banding Berdasarkan Data Mutasi (jika ada upload di tgl tersebut) & Kartu Stock (jika ada)
+      const hasUploadedMutasi = matchedSystemMutations.length > 0;
+      const hasUploadedCard = matchedStockCardEntries.length > 0;
+
+      const totalMutIn = matchedSystemMutations.reduce((s, m) => s + m.qtyIn, 0);
+      const totalMutOut = matchedSystemMutations.reduce((s, m) => s + m.qtyOut, 0);
       const mutSummaryParts = matchedSystemMutations.map(
         (m) =>
-          `${m.transactionNo} (${m.transactionType}: Masuk +${m.qtyIn.toLocaleString(
+          `Nomor: ${m.transactionNo} (${m.description}) [Masuk: +${m.qtyIn.toLocaleString(
             'id-ID'
-          )}, Keluar -${m.qtyOut.toLocaleString('id-ID')} ${item.uom})`
+          )}, Keluar: -${m.qtyOut.toLocaleString('id-ID')}]`
       );
 
       let mutationComparisonResult = '';
+      let potentialDiscrepancyFinding = '';
       let checkRecommendation = '';
 
-      if (d.day === 7 && (d.so === 0 || d.so === null) && (d.accurate ?? 0) > 0) {
-        mutationComparisonResult = `Pada ${d.dateLabel}, hasil banding menunjukkan SO Fisik bernilai 0 sedangkan History Mutasi Sistem mencatat saldo akhir ${(
-          d.accurate ?? 0
-        ).toLocaleString('id-ID')} ${item.uom} [${mutSummaryParts.join('; ')}].${
-          stockCardBalance !== null
-            ? ` Di Foto Kartu Stok Fisik tercatat saldo ${stockCardBalance.toLocaleString(
-                'id-ID'
-              )} ${item.uom} (${lastCardEntry?.notes || 'Kartu stok aktif'}).`
-            : ''
-        }`;
-        checkRecommendation =
-          stockCardBalance !== null
-            ? `Salin angka saldo Kartu Stok Fisik (${stockCardBalance.toLocaleString(
-                'id-ID'
-              )} ${item.uom}) ke kolom SO 7 Okt dan cek selisih sisa ${Math.abs(
-                (d.accurate ?? 0) - stockCardBalance
-              ).toLocaleString('id-ID')} ${item.uom} terhadap dokumen ${
-                matchedSystemMutations[0]?.transactionNo
-              }.`
-            : `Cek form opname fisik tanggal 7 Okt yang belum diinput ke spreadsheet (masih 0) dan cocokkan dengan bukti mutasi ${matchedSystemMutations[0]?.transactionNo}.`;
-      } else if (d.accurate !== null && d.accurate < 0) {
-        mutationComparisonResult = `Pada ${d.dateLabel}, saldo sistem Accurate minus (${d.accurate.toLocaleString(
+      if (hasUploadedMutasi || hasUploadedCard) {
+        mutationComparisonResult = `Hasil Banding ${d.dateLabel}: SO Fisik = ${soVal.toLocaleString(
           'id-ID'
-        )} ${item.uom}) sementara fisik SO ada ${(d.so ?? 0).toLocaleString(
+        )} ${item.uom} vs Sistem = ${accVal.toLocaleString(
           'id-ID'
-        )} ${item.uom} (Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom}). History mutasi sistem mencatat pengeluaran mendahului penerimaan barang.`;
-        checkRecommendation = `Periksa tanggal posting Bukti Penerimaan Barang (RI) di Accurate agar diinput sebelum dokumen pengeluaran pada ${d.dateLabel}.`;
-      } else if (d.deltaSO !== null && d.deltaAccurate !== null && d.deltaSO !== d.deltaAccurate) {
-        const mutGap = Math.abs(d.deltaSO - d.deltaAccurate);
-        mutationComparisonResult = `Hasil banding tanggal ${d.dateLabel}: Fisik SO bergerak ${
-          d.deltaSO >= 0 ? '+' : ''
-        }${d.deltaSO.toLocaleString('id-ID')} ${item.uom}, sedangkan History Mutasi Sistem bergerak ${
-          d.deltaAccurate >= 0 ? '+' : ''
-        }${d.deltaAccurate.toLocaleString('id-ID')} ${item.uom} melalui [${mutSummaryParts.join(
-          '; '
-        )}] -> terjadi deviasi mutasi harian sebesar ${mutGap.toLocaleString('id-ID')} ${
-          item.uom
-        }.${
-          stockCardBalance !== null
-            ? ` Banding Kartu Stok Fisik: tercatat saldo ${stockCardBalance.toLocaleString(
+        )} ${item.uom} (Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom}). ${
+          hasUploadedMutasi
+            ? `Data Mutasi terupload pada ${d.dateLabel}: [${mutSummaryParts.join(' ; ')}] (Total Masuk: +${totalMutIn.toLocaleString(
                 'id-ID'
-              )} ${item.uom} (Bukti: ${lastCardEntry?.docNo}, Masuk +${
+              )}, Total Keluar: -${totalMutOut.toLocaleString('id-ID')} ${item.uom}).`
+            : 'Belum ada upload mutasi sistem di tanggal ini.'
+        } ${
+          hasUploadedCard
+            ? `Kartu Stock terupload: Bukti ${lastCardEntry?.docNo} (Masuk +${
                 lastCardEntry?.qtyIn ?? 0
-              }, Keluar -${lastCardEntry?.qtyOut ?? 0}).`
+              }, Keluar -${lastCardEntry?.qtyOut ?? 0}, Saldo Akhir: ${stockCardBalance?.toLocaleString(
+                'id-ID'
+              )} ${item.uom}).`
             : ''
         }`;
-        checkRecommendation = `Audit dokumen mutasi [${matchedSystemMutations
-          .map((m) => m.transactionNo)
-          .join(', ')}] pada ${d.dateLabel}${
-          lastCardEntry ? ` dan dokumen Kartu Stok [${lastCardEntry.docNo}]` : ''
-        }. Pastikan selisih mutasi ${mutGap.toLocaleString(
+
+        // Cari transaksi spesifik yang jumlahnya mendekati selisih atau menjelaskan lonjakan
+        const matchingTxByQty = matchedSystemMutations.find(
+          (m) =>
+            Math.abs(m.qtyIn - d.selisih) <= 5 ||
+            Math.abs(m.qtyOut - d.selisih) <= 5 ||
+            (d.deltaSO !== null && Math.abs(m.qtyOut - Math.abs(d.deltaSO)) <= 5)
+        );
+
+        if (matchingTxByQty) {
+          potentialDiscrepancyFinding = `Potensi Selisih Ditemukan pada Transaksi Nomor [${
+            matchingTxByQty.transactionNo
+          }] (${matchingTxByQty.transactionType} - "${
+            matchingTxByQty.description
+          }"): Jumlah transaksi (Masuk: +${matchingTxByQty.qtyIn.toLocaleString(
+            'id-ID'
+          )}, Keluar: -${matchingTxByQty.qtyOut.toLocaleString(
+            'id-ID'
+          )} ${item.uom}) berkaitan langsung dengan ${varianceTypeLabel} sebesar ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom} pada tanggal ${d.dateLabel}.`;
+        } else if (hasUploadedMutasi) {
+          potentialDiscrepancyFinding = `Berdasarkan ${
+            matchedSystemMutations.length
+          } transaksi mutasi pada ${d.dateLabel} (Total Masuk +${totalMutIn.toLocaleString(
+            'id-ID'
+          )}, Keluar -${totalMutOut.toLocaleString('id-ID')} ${
+            item.uom
+          }) dibanding perubahan fisik SO (${
+            d.deltaSO !== null
+              ? `${d.deltaSO >= 0 ? '+' : ''}${d.deltaSO.toLocaleString('id-ID')}`
+              : '0'
+          } ${item.uom}), potensi selisih ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom} berasal dari selisih waktu cut-off posting pada nomor [${matchedSystemMutations
+            .map((m) => m.transactionNo)
+            .join(', ')}].`;
+        } else {
+          potentialDiscrepancyFinding = `Berdasarkan Kartu Stock tanggal ${
+            d.dateLabel
+          } (Bukti ${lastCardEntry?.docNo}, Saldo ${stockCardBalance?.toLocaleString(
+            'id-ID'
+          )} ${item.uom}), terdapat deviasi terhadap angka Sistem (${accVal.toLocaleString(
+            'id-ID'
+          )}) maupun SO (${soVal.toLocaleString('id-ID')}).`;
+        }
+
+        checkRecommendation = `Penyelesaian: Verifikasi fisik & dokumen Nomor [${
+          hasUploadedMutasi
+            ? matchedSystemMutations.map((m) => m.transactionNo).join(', ')
+            : lastCardEntry?.docNo || '-'
+        }] pada tanggal ${d.dateLabel}. Sesuaikan selisih ${d.selisih.toLocaleString(
           'id-ID'
-        )} ${item.uom} antara pengeluaran fisik gudang vs posting DO/RI Accurate segera direkonsiliasi.`;
+        )} ${item.uom} (${varianceTypeLabel}) agar saldo sistem dan fisik kembali klop 100%.`;
       } else {
-        mutationComparisonResult = `Pada ${d.dateLabel}, terdapat selisih ${d.selisih.toLocaleString(
+        // Ketika belum ada upload mutasi / kartu stock pada tanggal tersebut
+        mutationComparisonResult = `Rekap Mutasi Sistem & Kartu Stock pada tanggal ${d.dateLabel} masih kosong (belum ada file mutasi yang diupload untuk ${item.name} di tanggal ${d.dateLabel}). Analisa saat ini didasarkan pada perbandingan Spreadsheet SO (${soVal.toLocaleString(
           'id-ID'
-        )} ${item.uom} (SO: ${(d.so ?? 0).toLocaleString('id-ID')} vs Accurate: ${(
-          d.accurate ?? 0
-        ).toLocaleString('id-ID')}). History mutasi pada tanggal ini: [${mutSummaryParts.join(
-          '; '
-        )}].${
-          stockCardBalance !== null
-            ? ` Saldo di Foto Kartu Stok: ${stockCardBalance.toLocaleString('id-ID')} ${item.uom} (${
-                lastCardEntry?.docNo
-              }).`
-            : ''
-        }`;
-        checkRecommendation = `Telusuri bukti transaksi ${matchedSystemMutations
-          .map((m) => m.transactionNo)
-          .join(', ')} pada tanggal ${d.dateLabel} dan cocokkan fisik kartu stok gudang sebesar ${d.selisih.toLocaleString(
-          'id-ID'
-        )} ${item.uom}.`;
+        )} ${item.uom}) vs Accurate (${accVal.toLocaleString('id-ID')} ${item.uom}).`;
+
+        if (varianceDirection === 'SO_BELUM_INPUT') {
+          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Jumlah: ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom}): Angka SO Fisik pada tanggal ${
+            d.dateLabel
+          } masih 0 sementara saldo sistem tercatat ${accVal.toLocaleString(
+            'id-ID'
+          )} ${item.uom}.`;
+          checkRecommendation = `Penyelesaian: Input hasil hitung fisik SO tanggal ${d.dateLabel} atau upload file Mutasi / Kartu Stock tanggal ${d.dateLabel} untuk memvalidasi pergerakan barang.`;
+        } else if (varianceDirection === 'SISTEM_MINUS') {
+          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Jumlah: ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom}): Saldo sistem bernilai negatif (${accVal.toLocaleString(
+            'id-ID'
+          )} ${item.uom}) akibat pengeluaran diposting sebelum penerimaan.`;
+          checkRecommendation = `Penyelesaian: Upload data mutasi tanggal ${d.dateLabel} untuk mengecek nomor transaksi keluar, lalu perbaiki tanggal penerimaan barang (RI).`;
+        } else {
+          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Tipe: ${varianceTypeLabel} · Jumlah: ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom}): Terjadi perubahan fisik SO (${
+            d.deltaSO !== null
+              ? `${d.deltaSO >= 0 ? '+' : ''}${d.deltaSO.toLocaleString('id-ID')}`
+              : '0'
+          } ${item.uom}) yang tidak sebanding dengan perubahan saldo sistem (${
+            d.deltaAccurate !== null
+              ? `${d.deltaAccurate >= 0 ? '+' : ''}${d.deltaAccurate.toLocaleString('id-ID')}`
+              : '0'
+          } ${item.uom}). Upload file Mutasi pada tanggal ${
+            d.dateLabel
+          } untuk melihat Nomor & Deksripsi bukti penyebabnya.`;
+          checkRecommendation = `Penyelesaian: Upload file Master Mutasi Barang (${item.name}) untuk tanggal ${d.dateLabel} pada kolom di atas guna melacak Nomor transaksi Masuk/Keluar yang memicu selisih ${d.selisih.toLocaleString(
+            'id-ID'
+          )} ${item.uom}.`;
+        }
       }
 
       const acc = d.dailyAccuracyPercent ?? 0;
@@ -1218,6 +958,8 @@ export function buildVarianceDateMutationComparisons(
         soFisik: d.so,
         stokAccurate: d.accurate,
         qtySelisih: d.selisih,
+        varianceDirection,
+        varianceTypeLabel,
         dailyAccuracyPercent: acc,
         isLowestAccuracyDay: Boolean(d.isLowestAccuracyDay),
         deltaSO: d.deltaSO,
@@ -1228,6 +970,7 @@ export function buildVarianceDateMutationComparisons(
         gapSOvsStockCard,
         gapAccuratevsStockCard,
         mutationComparisonResult,
+        potentialDiscrepancyFinding,
         checkRecommendation,
         severity,
       };
@@ -1240,109 +983,378 @@ export function buildVarianceDateMutationComparisons(
     );
 }
 
-// Flexible parser for uploaded Excel (.xlsx/.xls) or CSV Histori Mutasi By Sistem
-export function parseSystemMutationBuffer(buffer: ArrayBuffer): SystemMutationRecord[] {
-  const wb = XLSX.read(buffer, { type: 'array' });
-  const firstSheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[firstSheetName];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-  return parseSystemMutationRows(rows);
+// Helper konversi angka mutasi yang aman untuk format Indonesia (1.500,00) maupun standar Excel (1500.00)
+function parseMutationQty(val: any): number {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') {
+    return Number.isFinite(val) ? Math.abs(val) : 0;
+  }
+  const str = String(val)
+    .replace(/[^\d.,\-]/g, '')
+    .trim();
+  if (!str) return 0;
+
+  // Jika menggunakan titik sebagai pemisah ribuan (contoh: "1.500" atau "12.450,5")
+  if (/^\-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(str)) {
+    const normalized = str.replace(/\./g, '').replace(',', '.');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? Math.abs(n) : 0;
+  }
+
+  // Jika menggunakan koma sebagai pemisah ribuan (contoh: "1,500" atau "12,450.5")
+  if (/^\-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(str)) {
+    const normalized = str.replace(/,/g, '');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? Math.abs(n) : 0;
+  }
+
+  // Jika hanya ada koma desimal (contoh: "125,5")
+  if (str.includes(',') && !str.includes('.')) {
+    const n = Number(str.replace(',', '.'));
+    return Number.isFinite(n) ? Math.abs(n) : 0;
+  }
+
+  const n = Number(str);
+  return Number.isFinite(n) ? Math.abs(n) : 0;
 }
 
-export function parseSystemMutationCsvText(text: string): SystemMutationRecord[] {
-  const wb = XLSX.read(text, { type: 'string' });
-  const firstSheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[firstSheetName];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-  return parseSystemMutationRows(rows);
+// Helper konversi Tanggal dari Excel Date object, Excel Serial Number, atau teks tanggal (DD/MM/YYYY, YYYY-MM-DD, "05 Okt")
+function parseFlexibleMutationDate(
+  rawVal: any,
+  fallbackDay: number = 1
+): { dayNumber: number; formattedDate: string } {
+  if (rawVal instanceof Date && !isNaN(rawVal.getTime())) {
+    const d = rawVal.getDate();
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  // Cek jika berupa Excel Serial Number (contoh: 45931 s/d 46500)
+  if (typeof rawVal === 'number' && rawVal > 30000 && rawVal < 60000) {
+    const utcDays = Math.floor(rawVal - 25569);
+    const dateObj = new Date(utcDays * 86400 * 1000);
+    const d = dateObj.getUTCDate();
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  const rawStr = String(rawVal ?? '').trim();
+  if (!rawStr) {
+    return {
+      dayNumber: fallbackDay,
+      formattedDate: `${String(fallbackDay).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  // Jika string angka 5 digit Excel serial date
+  if (/^\d{5}(\.\d+)?$/.test(rawStr)) {
+    const serial = Number(rawStr);
+    const utcDays = Math.floor(serial - 25569);
+    const dateObj = new Date(utcDays * 86400 * 1000);
+    const d = dateObj.getUTCDate();
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  // Format YYYY-MM-DD (contoh: 2026-10-05)
+  const isoMatch = rawStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (isoMatch) {
+    const d = Math.min(31, Math.max(1, Number(isoMatch[3])));
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  // Format DD/MM/YYYY atau MM/DD/YYYY (contoh: 05/10/2026 atau 10/05/2026)
+  const slashMatch = rawStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
+  if (slashMatch) {
+    const part1 = Number(slashMatch[1]);
+    const part2 = Number(slashMatch[2]);
+    // Jika part2 adalah 10 (Oktober) dan part1 bukan 10, maka DD/MM/YYYY
+    // Jika part1 adalah 10 dan part2 != 10 (misal dari konversi US MM/DD/YY), ambil part2 bila part1 == 10 dan rawStr punya tahun 2 digit
+    let d = part1;
+    if (part1 === 10 && part2 >= 1 && part2 <= 31 && slashMatch[3]?.length === 2) {
+      d = part2;
+    }
+    d = Math.min(31, Math.max(1, d));
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  // Format teks "05 Okt", "5 Oktober 2026", dll.
+  const numMatch = rawStr.match(/(\d{1,2})/);
+  if (numMatch) {
+    const d = Math.min(31, Math.max(1, Number(numMatch[1])));
+    return {
+      dayNumber: d,
+      formattedDate: `${String(d).padStart(2, '0')} Okt 2026`,
+    };
+  }
+
+  return {
+    dayNumber: fallbackDay,
+    formattedDate: rawStr,
+  };
 }
 
-function parseSystemMutationRows(rows: any[][]): SystemMutationRecord[] {
-  if (!rows || rows.length < 2) return [];
+// Parser khusus Format File Master Mutasi Barang:
+// Judul Horizontal: Tanggal | Nomor | Deksripsi | Masuk | Keluar (Isian data vertikal)
+export function parseSystemMutationBuffer(
+  buffer: ArrayBuffer,
+  targetItemName: string = 'Semua Item',
+  fallbackDay: number = 1
+): SystemMutationRecord[] {
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const allRecords: SystemMutationRecord[] = [];
 
-  // Find header row
-  let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(10, rows.length); i++) {
-    const joined = rows[i].map((c) => String(c).toLowerCase()).join(' ');
-    if (
-      joined.includes('tanggal') ||
-      joined.includes('date') ||
-      joined.includes('nama') ||
-      joined.includes('item') ||
-      joined.includes('barang') ||
-      joined.includes('masuk') ||
-      joined.includes('keluar') ||
-      joined.includes('kuantitas') ||
-      joined.includes('qty')
-    ) {
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: '',
+      raw: true,
+    });
+    const parsed = parseSystemMutationRows(rows, targetItemName, fallbackDay);
+    allRecords.push(...parsed);
+  }
+
+  return allRecords;
+}
+
+export function parseSystemMutationCsvText(
+  text: string,
+  targetItemName: string = 'Semua Item',
+  fallbackDay: number = 1
+): SystemMutationRecord[] {
+  const cleaned = text.trim();
+  if (!cleaned) return [];
+
+  // Jika teks dipisahkan tab (copy-paste langsung dari Excel) atau titik koma (;)
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.some((l) => l.includes('\t'))) {
+    const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
+    return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+  }
+  if (lines.some((l) => l.includes(';') && !l.includes(','))) {
+    const rows = lines.map((l) => l.split(';').map((c) => c.trim()));
+    return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+  }
+
+  const wb = XLSX.read(cleaned, { type: 'string', cellDates: true });
+  const firstSheetName = wb.SheetNames[0];
+  const sheet = wb.Sheets[firstSheetName];
+  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: '',
+    raw: true,
+  });
+  return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+}
+
+function inferTransactionType(nomor: string, deskripsi: string, qtyIn: number, qtyOut: number): string {
+  const combined = `${nomor} ${deskripsi}`.toLowerCase();
+  if (combined.includes('do') || combined.includes('sj') || combined.includes('surat jalan') || combined.includes('kirim')) {
+    return 'Delivery Order / Surat Jalan (Keluar)';
+  }
+  if (combined.includes('ri') || combined.includes('terima') || combined.includes('po') || combined.includes('inbound')) {
+    return 'Receive Item / Penerimaan (Masuk)';
+  }
+  if (combined.includes('jc') || combined.includes('job') || combined.includes('produksi') || combined.includes('rework')) {
+    return 'Job Costing / Produksi';
+  }
+  if (combined.includes('adj') || combined.includes('penyesuaian') || combined.includes('opname')) {
+    return 'Inventory Adjustment / Penyesuaian';
+  }
+  if (qtyIn > 0 && qtyOut === 0) return 'Mutasi Masuk';
+  if (qtyOut > 0 && qtyIn === 0) return 'Mutasi Keluar';
+  return 'Mutasi Harian';
+}
+
+function parseSystemMutationRows(
+  rows: any[][],
+  targetItemName: string = 'Semua Item',
+  fallbackDay: number = 1
+): SystemMutationRecord[] {
+  if (!rows || rows.length === 0) return [];
+
+  // Deteksi baris Judul Horizontal: Tanggal | Nomor | Deksripsi | Masuk | Keluar
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(20, rows.length); i++) {
+    const rowCells = rows[i].map((c) => String(c ?? '').toLowerCase().trim());
+    const matchCount = rowCells.filter((cell) =>
+      [
+        'tanggal',
+        'tgl',
+        'date',
+        'nomor',
+        'no',
+        'no. bukti',
+        'no bukti',
+        'deksripsi',
+        'deskripsi',
+        'keterangan',
+        'masuk',
+        'qty masuk',
+        'keluar',
+        'qty keluar',
+      ].some((kw) => cell === kw || cell.includes(kw))
+    ).length;
+
+    if (matchCount >= 2) {
       headerRowIdx = i;
       break;
     }
   }
 
-  const headers = rows[headerRowIdx].map((h) => String(h || '').toLowerCase().trim());
-
-  const findCol = (keywords: string[], fallback: number): number => {
-    const idx = headers.findIndex((h) => keywords.some((kw) => h.includes(kw)));
-    return idx >= 0 ? idx : fallback;
-  };
-
-  const dateCol = findCol(['tanggal', 'tgl', 'date'], 0);
-  const itemCol = findCol(['nama barang', 'nama item', 'item', 'barang', 'produk', 'deskripsi barang'], 1);
-  const noCol = findCol(['no. bukti', 'nomor', 'no transaksi', 'no.', 'kode', 'ref'], 2);
-  const typeCol = findCol(['tipe', 'jenis', 'transaksi', 'modul'], 3);
-  const inCol = findCol(['masuk', 'in', 'debet', 'terima', 'qty in'], 4);
-  const outCol = findCol(['keluar', 'out', 'kredit', 'kirim', 'qty out'], 5);
-  const balCol = findCol(['saldo', 'balance', 'akhir', 'kuantitas'], 6);
-  const uomCol = findCol(['satuan', 'uom', 'unit'], 7);
-  const descCol = findCol(['keterangan', 'catatan', 'memo', 'deskripsi'], 8);
-
-  const records: SystemMutationRecord[] = [];
-
-  for (let r = headerRowIdx + 1; r < rows.length; r++) {
-    const row = rows[r];
-    if (!row || row.every((c) => String(c).trim() === '')) continue;
-
-    const rawDate = String(row[dateCol] ?? '').trim();
-    const rawItem = String(row[itemCol] ?? '').trim();
-    if (!rawItem && !rawDate) continue;
-
-    // Extract day number from date string (e.g. "05/10/2026", "5 Okt", "2026-10-05")
-    let dayNum = 1;
-    const isoMatch = rawDate.match(/\d{4}-\d{2}-(\d{1,2})/);
-    const slashMatch = rawDate.match(/^(\d{1,2})[\/\-]/);
-    const numMatch = rawDate.match(/(\d{1,2})/);
-    if (isoMatch) {
-      dayNum = Number(isoMatch[1]);
-    } else if (slashMatch) {
-      dayNum = Number(slashMatch[1]);
-    } else if (numMatch) {
-      dayNum = Math.min(31, Math.max(1, Number(numMatch[1])));
+  // Cari kolom non-kosong pertama bila tidak ada header eksplisit
+  let firstNonEmptyCol = 0;
+  for (const r of rows) {
+    const idx = r.findIndex((c) => String(c ?? '').trim() !== '');
+    if (idx >= 0) {
+      firstNonEmptyCol = idx;
+      break;
     }
+  }
 
-    const toNum = (v: any): number => {
-      if (typeof v === 'number') return v;
-      const parsed = parseIndoNumber(String(v ?? ''));
-      return parsed ?? 0;
+  let dateCol = firstNonEmptyCol;
+  let noCol = firstNonEmptyCol + 1;
+  let descCol = firstNonEmptyCol + 2;
+  let inCol = firstNonEmptyCol + 3;
+  let outCol = firstNonEmptyCol + 4;
+  let optionalItemCol = -1;
+  let optionalBalCol = -1;
+
+  if (headerRowIdx >= 0) {
+    const headers = rows[headerRowIdx].map((h) => String(h ?? '').toLowerCase().trim());
+
+    const findExactOrPartialCol = (exactWords: string[], partialWords: string[], fallback: number): number => {
+      const exactIdx = headers.findIndex((h) => exactWords.includes(h));
+      if (exactIdx >= 0) return exactIdx;
+      const partialIdx = headers.findIndex((h) => partialWords.some((kw) => h.includes(kw)));
+      return partialIdx >= 0 ? partialIdx : fallback;
     };
 
-    const qtyIn = Math.abs(toNum(row[inCol]));
-    const qtyOut = Math.abs(toNum(row[outCol]));
-    const balanceAfter = row[balCol] !== undefined && String(row[balCol]).trim() !== '' ? toNum(row[balCol]) : null;
+    const baseOffset = headers.findIndex((h) => h !== '');
+    const off = baseOffset >= 0 ? baseOffset : 0;
+
+    dateCol = findExactOrPartialCol(['tanggal', 'tgl', 'date'], ['tanggal', 'tgl', 'date'], off);
+    noCol = findExactOrPartialCol(
+      ['nomor', 'no', 'no.', 'no. bukti', 'no bukti', 'kode'],
+      ['nomor', 'bukti', 'ref', 'transaksi'],
+      off + 1
+    );
+    descCol = findExactOrPartialCol(
+      ['deksripsi', 'deskripsi', 'keterangan', 'catatan', 'memo'],
+      ['deksripsi', 'deskripsi', 'keterangan', 'catatan', 'memo'],
+      off + 2
+    );
+    inCol = findExactOrPartialCol(
+      ['masuk', 'qty masuk', 'in', 'debet', 'terima'],
+      ['masuk', 'qty in', 'debet', 'terima'],
+      off + 3
+    );
+    outCol = findExactOrPartialCol(
+      ['keluar', 'qty keluar', 'out', 'kredit', 'kirim'],
+      ['keluar', 'qty out', 'kredit', 'kirim'],
+      off + 4
+    );
+    optionalItemCol = headers.findIndex((h) =>
+      ['nama barang', 'nama item', 'item', 'barang', 'produk'].some((kw) => h === kw || h.includes(kw))
+    );
+    optionalBalCol = headers.findIndex((h) =>
+      ['saldo', 'balance', 'saldo akhir'].some((kw) => h === kw || h.includes(kw))
+    );
+  }
+
+  const startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
+  const records: SystemMutationRecord[] = [];
+  let currentSectionItemName = targetItemName || 'Semua Item';
+  let lastValidDay = fallbackDay;
+  let lastValidFormattedDate = `${String(fallbackDay).padStart(2, '0')} Okt 2026`;
+
+  for (let r = startRow; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.every((c) => String(c ?? '').trim() === '')) continue;
+
+    const rawDateCell = row[dateCol];
+    const rawDateStr = String(rawDateCell ?? '').trim();
+    const rawNomor = String(row[noCol] ?? '').trim();
+    const rawDesc = String(row[descCol] ?? '').trim();
+
+    // Lewati jika baris ini adalah pengulangan judul header
+    if (
+      rawDateStr.toLowerCase() === 'tanggal' ||
+      rawNomor.toLowerCase() === 'nomor' ||
+      rawDesc.toLowerCase() === 'deksripsi' ||
+      rawDesc.toLowerCase() === 'deskripsi'
+    ) {
+      continue;
+    }
+
+    const qtyIn = parseMutationQty(row[inCol]);
+    const qtyOut = parseMutationQty(row[outCol]);
+
+    // Jika baris hanya berisi nama grup item di kolom pertama tanpa nomor/masuk/keluar
+    if (
+      rawDateStr &&
+      !(rawDateCell instanceof Date) &&
+      !/\d/.test(rawDateStr) &&
+      qtyIn === 0 &&
+      qtyOut === 0 &&
+      !rawNomor
+    ) {
+      currentSectionItemName = rawDateStr;
+      continue;
+    }
+
+    if (!rawDateStr && !rawNomor && !rawDesc && qtyIn === 0 && qtyOut === 0) continue;
+
+    let dayNumber = lastValidDay;
+    let formattedDate = lastValidFormattedDate;
+
+    if (rawDateStr || rawDateCell instanceof Date) {
+      const parsedDate = parseFlexibleMutationDate(rawDateCell, lastValidDay);
+      dayNumber = parsedDate.dayNumber;
+      formattedDate = parsedDate.formattedDate;
+      lastValidDay = dayNumber;
+      lastValidFormattedDate = formattedDate;
+    }
+
+    const explicitItem =
+      optionalItemCol >= 0 && String(row[optionalItemCol] ?? '').trim()
+        ? String(row[optionalItemCol]).trim()
+        : currentSectionItemName;
+
+    const balanceAfter =
+      optionalBalCol >= 0 && String(row[optionalBalCol] ?? '').trim() !== ''
+        ? parseMutationQty(row[optionalBalCol])
+        : null;
+
+    const transactionNo = rawNomor || `TRX-10/${dayNumber}-${r}`;
+    const description = rawDesc || 'Mutasi Barang';
 
     records.push({
-      id: `upload-mut-${r}`,
-      date: rawDate || `${dayNum} Okt 2026`,
-      dayNumber: dayNum,
-      itemName: rawItem || 'Item Umum',
-      transactionNo: String(row[noCol] ?? `TRX-${r}`).trim(),
-      transactionType: String(row[typeCol] ?? (qtyIn > 0 ? 'Barang Masuk (RI)' : 'Barang Keluar (DO)')).trim(),
+      id: `upload-mut-${r}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: formattedDate,
+      dayNumber,
+      transactionNo,
+      description,
       qtyIn,
       qtyOut,
+      itemName: explicitItem || targetItemName || 'Semua Item',
+      transactionType: inferTransactionType(transactionNo, description, qtyIn, qtyOut),
       balanceAfter,
-      uom: String(row[uomCol] ?? 'Unit').trim() || 'Unit',
+      uom: 'Unit',
       warehouse: 'Gudang Utama',
-      description: String(row[descCol] ?? 'Data Master Mutasi Sistem').trim(),
     });
   }
 

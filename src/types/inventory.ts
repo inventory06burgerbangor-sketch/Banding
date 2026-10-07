@@ -98,20 +98,20 @@ export interface ParsedSpreadsheetData {
   totalDrasticSpikes: number;
 }
 
-// Master Data Histori Mutasi By Sistem (Uploaded via Excel/CSV or Paste)
+// Master Data Histori Mutasi Barang (Format Horizontal: Tanggal | Nomor | Deksripsi | Masuk | Keluar, Data Vertikal)
 export interface SystemMutationRecord {
   id: string;
-  date: string; // e.g., "02 Okt 2026"
+  date: string; // Kolom 1: Tanggal (e.g., "02 Okt 2026")
   dayNumber: number; // 1..31
-  itemName: string;
-  transactionNo: string;
-  transactionType: string; // e.g., "Delivery Order (DO)", "Receive Item (RI)", "Job Costing / Finishing", "Inventory Adjustment"
-  qtyIn: number;
-  qtyOut: number;
+  transactionNo: string; // Kolom 2: Nomor (e.g., "DO.2026.10.00142" / "RI.2026.10.00088")
+  description: string; // Kolom 3: Deksripsi (e.g., "Pengiriman Cabang / Penerimaan Supplier")
+  qtyIn: number; // Kolom 4: Masuk
+  qtyOut: number; // Kolom 5: Keluar
+  itemName: string; // Nama item terkait (terdeteksi dari deskripsi/grup atau item terpilih)
+  transactionType: string; // Jenis transaksi yang teridentifikasi dari Nomor & Deksripsi
   balanceAfter: number | null;
   uom: string;
   warehouse: string;
-  description: string;
 }
 
 // Data Hasil Ekstraksi & Analisa Foto Kartu Stok Fisik (Opsional)
@@ -137,13 +137,15 @@ export interface AnalyzedStockCard {
   entries: StockCardEntry[];
 }
 
-// Hasil Banding & History Mutasi pada Tanggal Selisih + Rekomendasi Pengecekan
+// Hasil Banding & Analisa Berdasarkan Search Item (Tanggal Selisih, Jumlah Selisih, Tipe Selisih, Potensi Selisih, Rekomendasi Penyelesaian)
 export interface VarianceDateMutationComparison {
   day: number;
   dateLabel: string;
   soFisik: number | null;
   stokAccurate: number | null;
   qtySelisih: number;
+  varianceDirection: 'FISIK_KURANG' | 'FISIK_LEBIH' | 'SO_BELUM_INPUT' | 'SISTEM_MINUS' | 'SEIMBANG';
+  varianceTypeLabel: string; // Tipe Selisih
   dailyAccuracyPercent: number;
   isLowestAccuracyDay: boolean;
   deltaSO: number | null;
@@ -153,8 +155,9 @@ export interface VarianceDateMutationComparison {
   stockCardBalance: number | null;
   gapSOvsStockCard: number | null;
   gapAccuratevsStockCard: number | null;
-  mutationComparisonResult: string; // Hasil Analisa Banding History Mutasi pada tanggal selisih
-  checkRecommendation: string; // Rekomendasi Pengecekan spesifik pada tanggal selisih
+  mutationComparisonResult: string; // Hasil Banding dengan Data Mutasi & Kartu Stok
+  potentialDiscrepancyFinding: string; // Potensi Selisih berdasar Analisa Tanggal, Jenis Transaksi, dan Jumlah
+  checkRecommendation: string; // Rekomendasi Penyelesaian
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
 }
 
