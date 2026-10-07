@@ -1,13 +1,21 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
+  Camera,
+  CheckCircle2,
+  ClipboardCheck,
   Database,
   Flame,
   Target,
 } from 'lucide-react';
-import { PeriodItemAnalysis, SystemMutationRecord } from '../types/inventory';
+import {
+  AnalyzedStockCard,
+  PeriodItemAnalysis,
+  SystemMutationRecord,
+} from '../types/inventory';
 import { RAW_ACCURATE_BOTTOM_EXPORT_NOTES } from '../data/rawSpreadsheetCsv';
+import { buildVarianceDateMutationComparisons } from '../utils/analyzer';
 
 interface TransactionBreakdownPanelProps {
   selectedAnalysis: PeriodItemAnalysis;
@@ -16,7 +24,9 @@ interface TransactionBreakdownPanelProps {
   endDay: number;
   onSelectItemAnalysis: (itemAnalysis: PeriodItemAnalysis) => void;
   systemMutations: SystemMutationRecord[];
+  stockCards: AnalyzedStockCard[];
   onOpenMutationUploadModal: () => void;
+  onJumpToStockCard: () => void;
 }
 
 export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps> = ({
@@ -26,7 +36,9 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
   endDay,
   onSelectItemAnalysis,
   systemMutations,
+  stockCards,
   onOpenMutationUploadModal,
+  onJumpToStockCard,
 }) => {
   const { item, periodDaily, lowestAccuracyDayRecord } = selectedAnalysis;
   const rawExportNote = RAW_ACCURATE_BOTTOM_EXPORT_NOTES[item.name];
@@ -37,40 +49,46 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
       item.name.toLowerCase().includes(m.itemName.toLowerCase())
   );
 
+  // Compute Variance Date Mutation Comparisons & Check Recommendations
+  const varianceComparisons = useMemo(
+    () =>
+      buildVarianceDateMutationComparisons(
+        selectedAnalysis,
+        systemMutations,
+        stockCards
+      ),
+    [selectedAnalysis, systemMutations, stockCards]
+  );
+
   return (
     <section
       id="item-historical-analysis"
       className="border border-slate-800 bg-slate-900/80 rounded-2xl p-6 shadow-xl space-y-6"
     >
-      {/* Header & Item Selector */}
+      {/* Simplified Header & Item Selector */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-5 border-b border-slate-800">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
             <Target className="w-3.5 h-3.5" />
-            <span>Analisa Detail Tiap Item (Baseline 100,00%)</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Periode: {startDay} Okt – {endDay} Okt 2026
-            </span>
+            <span>Periode {startDay}–{endDay} Okt · Baseline 100%</span>
           </div>
           <h2 className="text-xl font-bold text-slate-100 mt-1">
-            Breakdown Historical Stock Akurasi &amp; Qty Selisih:{' '}
-            <span className="text-amber-400">{item.name}</span>
+            Analisa Item: <span className="text-amber-400">{item.name}</span>
           </h2>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1">
-            <span>Kategori: {item.category}</span>
+            <span>{item.category}</span>
             <span aria-hidden="true">·</span>
             <span>Satuan: {item.uom}</span>
             <span aria-hidden="true">·</span>
             <span>
-              Rata-Rata Akurasi Item ({startDay}–{endDay} Okt):{' '}
+              Akurasi:{' '}
               <strong className="text-rose-400 font-mono">
                 {selectedAnalysis.periodAccuracyPercent.toFixed(2).replace('.', ',')}%
               </strong>
             </span>
             <span aria-hidden="true">·</span>
             <span>
-              Total Qty Selisih:{' '}
+              Qty Selisih:{' '}
               <strong className="text-amber-300 font-mono">
                 {selectedAnalysis.periodSelisih.toLocaleString('id-ID')} {item.uom}
               </strong>
@@ -79,12 +97,12 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
         </div>
 
         {/* Item Switcher */}
-        <div className="flex items-center gap-2.5 self-start">
+        <div className="flex flex-wrap items-center gap-2.5 self-start">
           <label
             htmlFor="select-item-historical"
             className="text-xs text-slate-400 whitespace-nowrap"
           >
-            Ganti Item:
+            Pilih Item:
           </label>
           <select
             id="select-item-historical"
@@ -97,45 +115,44 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
           >
             {allPeriodItems.map((p) => (
               <option key={p.item.id} value={p.item.id}>
-                {p.item.name} — Akurasi: {p.periodAccuracyPercent.toFixed(2).replace('.', ',')}% |
-                Selisih: {p.periodSelisih.toLocaleString('id-ID')} {p.item.uom}
+                {p.item.name} ({p.periodAccuracyPercent.toFixed(2).replace('.', ',')}%)
               </option>
             ))}
           </select>
         </div>
       </div>
 
-      {/* 3-Card Summary: Period Accuracy vs 100%, Lowest Accuracy Date Highlight, Root Cause */}
+      {/* 3-Card Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="border border-slate-800 bg-slate-950/80 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>Akurasi Item ({startDay}–{endDay} Okt)</span>
-            <span className="font-mono text-emerald-400">Baseline: 100,00%</span>
+            <span>Akurasi Periode</span>
+            <span className="font-mono text-emerald-400">Baseline 100%</span>
           </div>
           <div className="text-3xl font-mono tabular-nums font-bold text-amber-400 mt-1.5">
             {selectedAnalysis.periodAccuracyPercent.toFixed(2).replace('.', ',')}%
           </div>
           <div className="text-xs font-mono tabular-nums text-rose-400 mt-1">
-            Deviasi: {selectedAnalysis.gapFromBaseline100.toFixed(2).replace('.', ',')}% dari 100%
+            Deviasi: {selectedAnalysis.gapFromBaseline100.toFixed(2).replace('.', ',')}%
           </div>
           <div className="text-xs text-slate-300 mt-2 pt-2 border-t border-slate-800/80 flex justify-between font-mono tabular-nums">
             <span>Total SO: {selectedAnalysis.periodSO.toLocaleString('id-ID')}</span>
             <span className="text-rose-300 font-semibold">
-              Qty Selisih: {selectedAnalysis.periodSelisih.toLocaleString('id-ID')} {item.uom}
+              Selisih: {selectedAnalysis.periodSelisih.toLocaleString('id-ID')} {item.uom}
             </span>
           </div>
         </div>
 
-        {/* Highlight Tanggal dengan Akurasi Terendah */}
+        {/* Highlight Tanggal Akurasi Terendah */}
         <div className="border-2 border-rose-500/80 bg-rose-950/30 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs font-semibold text-rose-300">
-            <span>Highlight Tanggal Akurasi Terendah</span>
+            <span>Tanggal Akurasi Terendah</span>
             <Flame className="w-4 h-4 text-rose-400" />
           </div>
           {lowestAccuracyDayRecord ? (
             <>
               <div className="text-2xl font-mono tabular-nums font-bold text-rose-400 mt-1.5">
-                {lowestAccuracyDayRecord.dateLabel} 2026 —{' '}
+                {lowestAccuracyDayRecord.dateLabel} —{' '}
                 {(lowestAccuracyDayRecord.dailyAccuracyPercent ?? 0)
                   .toFixed(2)
                   .replace('.', ',')}
@@ -152,14 +169,14 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
             </>
           ) : (
             <div className="text-sm text-slate-400 mt-2">
-              Tidak ada selisih pada periode tanggal ini (Akurasi 100%).
+              Tidak ada selisih pada periode ini (Akurasi 100%).
             </div>
           )}
         </div>
 
-        {/* Diagnosa & Action Plan */}
+        {/* Ringkasan Diagnosa & Tindakan */}
         <div className="border border-slate-800 bg-slate-950/80 rounded-xl p-4">
-          <div className="text-xs text-slate-400">Analisa Penyebab &amp; Rekomendasi</div>
+          <div className="text-xs text-slate-400">Kesimpulan &amp; Rekomendasi</div>
           <div className="text-sm font-semibold text-amber-300 mt-1">
             {item.rootCauseCategory}
           </div>
@@ -167,26 +184,164 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
             {item.rootCauseSummary}
           </p>
           <p className="text-xs text-emerald-400 font-medium mt-2 pt-2 border-t border-slate-800">
-            Tindakan: {item.recommendedAction}
+            Rekomendasi: {item.recommendedAction}
           </p>
           {rawExportNote && (
-            <p className="text-[11px] text-amber-300/90 mt-1.5">{rawExportNote.note}</p>
+            <p className="text-[11px] text-amber-300/90 mt-1">{rawExportNote.note}</p>
           )}
         </div>
       </div>
 
-      {/* Visual Historical Stock Accuracy & Qty Selisih Cards across Selected Dates */}
+      {/* NEW CORE SECTION: Hasil Banding History Mutasi pada Tanggal Selisih & Rekomendasi Pengecekan */}
+      <div className="border-2 border-amber-500/40 bg-slate-950/90 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-800">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
+              <ClipboardCheck className="w-4 h-4" />
+              <span>Logika Banding Otomatis: SO vs History Mutasi Sistem vs Kartu Stok</span>
+            </div>
+            <h3 className="text-base font-bold text-slate-100 mt-0.5">
+              Hasil Banding Mutasi pada Tanggal Selisih &amp; Rekomendasi Pengecekan
+            </h3>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onJumpToStockCard}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg transition-colors"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Banding Foto Kartu Stok</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenMutationUploadModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 rounded-lg transition-colors"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Update Mutasi Sistem</span>
+            </button>
+          </div>
+        </div>
+
+        {varianceComparisons.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3.5">
+            {varianceComparisons.map((vc) => (
+              <div
+                key={vc.day}
+                className={`rounded-xl p-4 border transition-all ${
+                  vc.isLowestAccuracyDay
+                    ? 'border-2 border-rose-500 bg-rose-950/30'
+                    : 'border-slate-800 bg-slate-900/70'
+                }`}
+              >
+                {/* Top Row of Variance Date Card */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800/80">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-slate-100 font-mono">
+                      Tanggal Selisih: {vc.dateLabel} 2026
+                    </span>
+                    {vc.isLowestAccuracyDay && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-500 text-white px-2 py-0.5 rounded">
+                        <Flame className="w-3 h-3" />
+                        AKURASI TERENDAH ({vc.dailyAccuracyPercent.toFixed(2).replace('.', ',')}%)
+                      </span>
+                    )}
+                    {!vc.isLowestAccuracyDay && (
+                      <span className="text-xs font-mono text-amber-300">
+                        (Akurasi: {vc.dailyAccuracyPercent.toFixed(2).replace('.', ',')}%)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 text-xs font-mono tabular-nums">
+                    <span className="text-slate-300">
+                      SO Fisik: <strong>{vc.soFisik !== null ? vc.soFisik.toLocaleString('id-ID') : '-'}</strong>
+                    </span>
+                    <span className="text-slate-300">
+                      Accurate: <strong>{vc.stokAccurate !== null ? vc.stokAccurate.toLocaleString('id-ID') : '-'}</strong>
+                    </span>
+                    {vc.stockCardBalance !== null && (
+                      <span className="text-amber-300">
+                        Kartu Stok: <strong>{vc.stockCardBalance.toLocaleString('id-ID')}</strong>
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold">
+                      Selisih: {vc.qtySelisih.toLocaleString('id-ID')} {item.uom}
+                    </span>
+                  </div>
+                </div>
+
+                {/* History Mutasi Sistem & Kartu Stok Badges on this Variance Date */}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {vc.matchedSystemMutations.map((m) => (
+                    <div
+                      key={m.id}
+                      className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-950 border border-sky-500/30 text-xs font-mono text-slate-200"
+                    >
+                      <span className="text-sky-400 font-bold">{m.transactionNo}</span>
+                      <span className="font-sans text-slate-400">({m.transactionType})</span>
+                      {m.qtyIn > 0 && (
+                        <span className="text-emerald-400">+{m.qtyIn.toLocaleString('id-ID')}</span>
+                      )}
+                      {m.qtyOut > 0 && (
+                        <span className="text-rose-400">-{m.qtyOut.toLocaleString('id-ID')}</span>
+                      )}
+                    </div>
+                  ))}
+
+                  {vc.matchedStockCardEntries.map((sc) => (
+                    <div
+                      key={sc.id}
+                      className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs font-mono text-amber-200"
+                    >
+                      <span className="font-sans font-semibold text-amber-400">Kartu Stok:</span>
+                      <span>{sc.docNo}</span>
+                      <span>(Saldo: {sc.balance.toLocaleString('id-ID')})</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Hasil Analisa Banding & Rekomendasi Pengecekan */}
+                <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 leading-relaxed text-slate-200">
+                    <div className="font-semibold text-sky-400 mb-1">
+                      Hasil Analisa History Mutasi ({vc.dateLabel}):
+                    </div>
+                    {vc.mutationComparisonResult}
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-emerald-950/25 border border-emerald-500/40 leading-relaxed text-slate-100">
+                    <div className="font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Rekomendasi Pengecekan ({vc.dateLabel}):</span>
+                    </div>
+                    {vc.checkRecommendation}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-emerald-400 py-3">
+            Tidak ditemukan tanggal selisih pada periode {startDay}–{endDay} Okt. Akurasi item ini 100% klop.
+          </div>
+        )}
+      </div>
+
+      {/* Daily Accuracy & Qty Selisih Cards */}
       <div className="border border-slate-800 bg-slate-950/60 rounded-xl p-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
           <div className="text-xs font-semibold text-slate-200">
-            Visualisasi Historical Stock Accuracy (vs Baseline 100%) &amp; Qty Selisih per Tanggal
+            Akurasi &amp; Qty Selisih Harian ({startDay}–{endDay} Okt)
           </div>
           <div className="flex items-center gap-4 text-xs text-slate-400">
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" /> % Akurasi Harian
+              <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" /> Akurasi Harian
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-xs bg-rose-500 inline-block" /> Tanggal Akurasi Terendah
+              <span className="w-2.5 h-2.5 rounded-xs bg-rose-500 inline-block" /> Tgl Terendah
             </span>
           </div>
         </div>
@@ -217,8 +372,7 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                   )}
                 </div>
 
-                {/* Accuracy Bar relative to 100% Baseline */}
-                <div className="mt-3">
+                <div className="mt-2.5">
                   <div className="flex justify-between items-baseline">
                     <span className="text-[10px] text-slate-400">Akurasi</span>
                     <span
@@ -249,9 +403,9 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                   </div>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-1 font-mono tabular-nums text-[11px]">
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-1 font-mono tabular-nums text-[11px]">
                   <div className="flex justify-between">
-                    <span className="text-slate-400 font-sans">Qty Selisih:</span>
+                    <span className="text-slate-400 font-sans">Selisih:</span>
                     <span
                       className={
                         isLowest
@@ -271,7 +425,7 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                     </span>
                   </div>
                   <div className="flex justify-between text-slate-400">
-                    <span className="font-sans">Accurate:</span>
+                    <span className="font-sans">Acc:</span>
                     <span className="text-slate-200">
                       {d.accurate !== null ? d.accurate.toLocaleString('id-ID') : '-'}
                     </span>
@@ -289,14 +443,14 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
           <thead>
             <tr className="border-b border-slate-800 text-xs text-slate-400">
               <th className="py-3 px-3 font-medium">Tanggal</th>
-              <th className="py-3 px-3 font-medium text-right">Stock Accuracy (vs 100%)</th>
-              <th className="py-3 px-3 font-medium text-right">Gap dari 100%</th>
+              <th className="py-3 px-3 font-medium text-right">Akurasi</th>
+              <th className="py-3 px-3 font-medium text-right">Deviasi</th>
               <th className="py-3 px-3 font-medium text-right">Qty Selisih</th>
-              <th className="py-3 px-3 font-medium text-right">Stok Fisik (SO)</th>
-              <th className="py-3 px-3 font-medium text-right">Mutasi Fisik (&Delta; SO)</th>
-              <th className="py-3 px-3 font-medium text-right">Stok Accurate</th>
-              <th className="py-3 px-3 font-medium text-right">Mutasi Sistem (&Delta; Acc)</th>
-              <th className="py-3 px-3 font-medium">Analisa Histori &amp; Highlight Akurasi Terendah</th>
+              <th className="py-3 px-3 font-medium text-right">SO Fisik</th>
+              <th className="py-3 px-3 font-medium text-right">&Delta; SO</th>
+              <th className="py-3 px-3 font-medium text-right">Accurate</th>
+              <th className="py-3 px-3 font-medium text-right">&Delta; Acc</th>
+              <th className="py-3 px-3 font-medium">Keterangan Mutasi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/70 text-sm">
@@ -320,7 +474,7 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                       <span>{d.dateLabel} 2026</span>
                       {isLowest && (
                         <span className="text-[10px] font-sans font-bold bg-rose-500 text-white px-1.5 py-0.5 rounded">
-                          AKURASI TERENDAH
+                          TERENDAH
                         </span>
                       )}
                     </div>
@@ -348,7 +502,7 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                     {isHoliday || d.gapFromBaseline100 === null ? (
                       <span className="text-slate-500">-</span>
                     ) : d.gapFromBaseline100 === 0 ? (
-                      <span className="text-emerald-400">0,00% (Klop 100%)</span>
+                      <span className="text-emerald-400">0,00%</span>
                     ) : (
                       <span className="text-rose-400 font-semibold">
                         {d.gapFromBaseline100.toFixed(2).replace('.', ',')}%
@@ -423,8 +577,7 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
                   <td className="py-3 px-3 text-xs leading-relaxed">
                     {isLowest && (
                       <div className="font-semibold text-rose-300 mb-0.5">
-                        HIGHLIGHT AKURASI TERENDAH ({d.dateLabel}):{' '}
-                        {d.spikeReason || `Akurasi turun ke ${(d.dailyAccuracyPercent ?? 0).toFixed(2)}%`}
+                        {d.spikeReason || `Akurasi terendah ${(d.dailyAccuracyPercent ?? 0).toFixed(2)}%`}
                       </div>
                     )}
                     <span className="text-slate-300">{d.transactionNote}</span>
@@ -436,39 +589,34 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
         </table>
       </div>
 
-      {/* Linked Master Data Histori Mutasi By Sistem for this Item */}
-      <div className="border border-slate-800 bg-slate-950/70 rounded-xl p-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-3 border-b border-slate-800">
-          <div>
+      {/* Linked Master Mutasi Sistem Table */}
+      {matchingMutations.length > 0 && (
+        <div className="border border-slate-800 bg-slate-950/70 rounded-xl p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-3 border-b border-slate-800">
             <div className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
               <Database className="w-3.5 h-3.5" />
-              <span>Rekonsiliasi Master Data Histori Mutasi By Sistem ({item.name})</span>
+              <span>Log Mutasi Sistem ({item.name})</span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Menampilkan log transaksi masuk/keluar sistem yang terhubung sebagai Master Data untuk item ini.
-            </p>
+            <button
+              type="button"
+              onClick={onOpenMutationUploadModal}
+              className="px-3 py-1 text-xs font-semibold bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 rounded-lg transition-colors self-start"
+            >
+              Upload Mutasi Sistem
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onOpenMutationUploadModal}
-            className="px-3 py-1.5 text-xs font-semibold bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 rounded-lg transition-colors whitespace-nowrap self-start"
-          >
-            Upload / Update Master Mutasi Sistem
-          </button>
-        </div>
 
-        {matchingMutations.length > 0 ? (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
                   <th className="py-2 px-2.5">Tanggal</th>
-                  <th className="py-2 px-2.5">No. Bukti Sistem</th>
-                  <th className="py-2 px-2.5">Tipe Transaksi</th>
-                  <th className="py-2 px-2.5 text-right">Qty Masuk (In)</th>
-                  <th className="py-2 px-2.5 text-right">Qty Keluar (Out)</th>
-                  <th className="py-2 px-2.5 text-right">Saldo Akhir Sistem</th>
-                  <th className="py-2 px-2.5">Keterangan Mutasi</th>
+                  <th className="py-2 px-2.5">No. Bukti</th>
+                  <th className="py-2 px-2.5">Tipe</th>
+                  <th className="py-2 px-2.5 text-right">Masuk</th>
+                  <th className="py-2 px-2.5 text-right">Keluar</th>
+                  <th className="py-2 px-2.5 text-right">Saldo</th>
+                  <th className="py-2 px-2.5">Keterangan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono tabular-nums">
@@ -492,12 +640,8 @@ export const TransactionBreakdownPanel: React.FC<TransactionBreakdownPanelProps>
               </tbody>
             </table>
           </div>
-        ) : (
-          <div className="mt-3 text-xs text-slate-400 py-3">
-            Belum ada baris histori mutasi sistem spesifik untuk <strong>{item.name}</strong> di Master Data. Klik tombol <strong>Upload / Update Master Mutasi Sistem</strong> untuk mengunggah file histori mutasi dari sistem Anda.
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 };

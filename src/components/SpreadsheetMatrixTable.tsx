@@ -48,15 +48,15 @@ export const SpreadsheetMatrixTable: React.FC<SpreadsheetMatrixTableProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-5 border-b border-slate-800">
           <div>
             <div className="flex items-center gap-2 text-xs text-amber-400 font-medium">
-              <span>Matriks Rekonsiliasi Harian</span>
+              <span>Data Harian 1–7 Okt</span>
               <span aria-hidden="true">·</span>
-              <span>Highlight Lonjakan Drastis &amp; Baris Bawah Stock Accuracy</span>
+              <span>Highlight Lonjakan &amp; Akurasi Bawah</span>
             </div>
             <h2 className="text-xl font-semibold text-slate-100 mt-1">
-              Tabel Spreadsheet SO vs Accurate (1–7 Oktober) &amp; Total Error Ujung Kanan
+              Tabel SO &amp; Akurasi
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              Angka dengan lonjakan selisih drastis diberi highlight merah menyala (<Flame className="w-3.5 h-3.5 inline text-rose-400" />). Klik baris mana pun untuk membuka Breakdown Histori Transaksi di atas.
+              Lonjakan selisih drastis ditandai merah (<Flame className="w-3.5 h-3.5 inline text-rose-400" />). Klik baris untuk melihat Analisa Item.
             </p>
           </div>
 

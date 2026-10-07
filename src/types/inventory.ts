@@ -113,3 +113,48 @@ export interface SystemMutationRecord {
   warehouse: string;
   description: string;
 }
+
+// Data Hasil Ekstraksi & Analisa Foto Kartu Stok Fisik (Opsional)
+export interface StockCardEntry {
+  id: string;
+  date: string; // e.g., "03 Okt 2026"
+  dayNumber: number; // 1..31
+  docNo: string;
+  qtyIn: number;
+  qtyOut: number;
+  balance: number;
+  notes: string;
+}
+
+export interface AnalyzedStockCard {
+  id: string;
+  itemName: string;
+  uom: string;
+  uploadedAt: string;
+  imagePreviewUrl?: string;
+  summaryAnalysis: string;
+  anomaliesFound: string[];
+  entries: StockCardEntry[];
+}
+
+// Hasil Banding & History Mutasi pada Tanggal Selisih + Rekomendasi Pengecekan
+export interface VarianceDateMutationComparison {
+  day: number;
+  dateLabel: string;
+  soFisik: number | null;
+  stokAccurate: number | null;
+  qtySelisih: number;
+  dailyAccuracyPercent: number;
+  isLowestAccuracyDay: boolean;
+  deltaSO: number | null;
+  deltaAccurate: number | null;
+  matchedSystemMutations: SystemMutationRecord[];
+  matchedStockCardEntries: StockCardEntry[];
+  stockCardBalance: number | null;
+  gapSOvsStockCard: number | null;
+  gapAccuratevsStockCard: number | null;
+  mutationComparisonResult: string; // Hasil Analisa Banding History Mutasi pada tanggal selisih
+  checkRecommendation: string; // Rekomendasi Pengecekan spesifik pada tanggal selisih
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+}
+

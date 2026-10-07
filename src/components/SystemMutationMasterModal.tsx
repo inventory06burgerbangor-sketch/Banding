@@ -123,10 +123,10 @@ export const SystemMutationMasterModal: React.FC<SystemMutationMasterModalProps>
             <Database className="w-5 h-5 text-sky-400" />
             <div>
               <h3 className="text-lg font-bold text-slate-100">
-                Upload &amp; Kelola Master Data Histori Mutasi By Sistem
+                Upload Mutasi Sistem
               </h3>
               <p className="text-xs text-slate-400">
-                Mendukung file Excel (.xlsx, .xls), CSV (.csv), maupun Copy-Paste langsung dari laporan Histori Mutasi Accurate / ERP.
+                Upload file Excel (.xlsx, .xls), CSV (.csv), atau Paste tabel mutasi sistem sebagai Master Data.
               </p>
             </div>
           </div>

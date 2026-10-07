@@ -47,7 +47,7 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
   periodItems,
   onSelectItemAnalysis,
 }) => {
-  const [isBubbleOpen, setIsBubbleOpen] = useState<boolean>(true);
+  const [isBubbleOpen, setIsBubbleOpen] = useState<boolean>(false);
   const [activeBubbleTab, setActiveBubbleTab] = useState<BubbleTab>('daily_breakdown');
 
   const availableDays = [1, 2, 3, 4, 5, 6, 7];
@@ -67,12 +67,10 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
           <div>
             <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
               <Target className="w-3.5 h-3.5" />
-              <span>Target Baseline Akurasi: 100,00%</span>
-              <span aria-hidden="true">·</span>
-              <span>Filter Periode Tanggal Dinamis</span>
+              <span>Baseline 100% · Periode Tanggal</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-100 mt-1">
-              Total Rata-Rata Stock Accuracy Selama Periode Tanggal Terpilih
+              Rata-Rata Akurasi
             </h1>
           </div>
 
@@ -213,10 +211,10 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
               </div>
             </div>
 
-            {/* Opsi Analisa Hasil Rata-Rata (Trigger Button for Bubble Menu) */}
+            {/* Analisa Rata-Rata (Trigger Button for Bubble Menu) */}
             <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between gap-3">
               <span className="text-xs text-slate-400">
-                Klik untuk membuka rincian analisa rata-rata:
+                Rincian analisa periode:
               </span>
               <button
                 type="button"
@@ -228,7 +226,7 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Opsi Analisa Hasil Rata-Rata</span>
+                <span>Analisa Rata-Rata</span>
                 {isBubbleOpen ? (
                   <ChevronUp className="w-3.5 h-3.5" />
                 ) : (
@@ -316,11 +314,11 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
               <h2 className="text-base font-bold text-slate-100">
-                Bubble Menu Analisa Rata-Rata Akurasi ({startDay} Okt – {endDay} Okt:{' '}
+                Analisa Rata-Rata ({startDay}–{endDay} Okt:{' '}
                 <span className="text-amber-400 font-mono">
                   {averagePeriodAccuracy.toFixed(2).replace('.', ',')}%
-                </span>{' '}
-                vs Baseline 100%)
+                </span>
+                )
               </h2>
             </div>
 
@@ -334,7 +332,7 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
                     : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-700'
                 }`}
               >
-                1. Breakdown Akurasi per Tanggal
+                Per Tanggal
               </button>
               <button
                 type="button"
@@ -345,7 +343,7 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
                     : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-700'
                 }`}
               >
-                2. Penyebab Deviasi dari 100%
+                Penyebab Selisih
               </button>
               <button
                 type="button"
@@ -356,13 +354,13 @@ export const PeriodAverageAccuracyHero: React.FC<PeriodAverageAccuracyHeroProps>
                     : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-700'
                 }`}
               >
-                3. Simulasi Menuju Baseline 100%
+                Simulasi 100%
               </button>
               <button
                 type="button"
                 onClick={() => setIsBubbleOpen(false)}
                 className="p-1.5 text-slate-400 hover:text-slate-100 rounded-full bg-slate-950 border border-slate-800"
-                title="Tutup Bubble Analisa"
+                title="Tutup"
               >
                 <X className="w-4 h-4" />
               </button>
