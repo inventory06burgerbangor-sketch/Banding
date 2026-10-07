@@ -1,0 +1,6 @@
+{
+  "name": "StockGuard — Real-Time Inventory Accuracy & Variance Analyzer",
+  "description": "Dashboard analisa akurasi stok real-time (auto-update 30 detik) dengan identifikasi Top 10 item selisih terbesar, breakdown histori transaksi, deteksi lonjakan selisih drastis, dan ringkasan poin akurasi stok.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
