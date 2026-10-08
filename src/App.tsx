@@ -1,16 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   FileSearch,
   FileSpreadsheet,
-  Pause,
-  Play,
   RefreshCw,
-  Upload,
 } from 'lucide-react';
-import { INITIAL_SPREADSHEET_CSV } from './data/rawSpreadsheetCsv';
+import {
+  DEFAULT_SHEET_NAME,
+  INITIAL_SPREADSHEET_CSV,
+  SPREADSHEET_DATA_VERSION,
+} from './data/rawSpreadsheetCsv';
 import {
   computePeriodDashboardAnalysis,
   INITIAL_SAMPLE_STOCK_CARDS,
@@ -18,11 +20,11 @@ import {
   parseAndAnalyzeSpreadsheet,
 } from './utils/analyzer';
 import { PeriodAverageAccuracyHero } from './components/PeriodAverageAccuracyHero';
+import { DashboardChartsSection } from './components/DashboardChartsSection';
 import { Top10ErrorSection } from './components/Top10ErrorSection';
 import { TransactionBreakdownPanel } from './components/TransactionBreakdownPanel';
 import { SpreadsheetMatrixTable } from './components/SpreadsheetMatrixTable';
 import { SpreadsheetSyncModal } from './components/SpreadsheetSyncModal';
-import { SystemMutationMasterModal } from './components/SystemMutationMasterModal';
 import {
   AnalyzedStockCard,
   PeriodItemAnalysis,
@@ -31,97 +33,177 @@ import {
 
 type MainMenuOption = 'dashboard_report' | 'analisa';
 
+const STORAGE_VERSION_KEY = 'bangor_sheet_version';
+const STORAGE_CSV_KEY = 'bangor_sheet_csv';
+const STORAGE_URL_KEY = 'bangor_sheet_url';
+const STORAGE_SHEET_NAME_KEY = 'bangor_sheet_name';
+
 export default function App() {
   // 2 Opsi Menu Utama: 'dashboard_report' | 'analisa'
   const [activeMenu, setActiveMenu] = useState<MainMenuOption>('dashboard_report');
 
-  const [csvData, setCsvData] = useState<string>(INITIAL_SPREADSHEET_CSV);
-  const [sheetUrl, setSheetUrl] = useState<string>('');
+  const [csvData, setCsvData] = useState<string>(() => {
+    try {
+      const savedVersion = localStorage.getItem(STORAGE_VERSION_KEY);
+      const savedCsv = localStorage.getItem(STORAGE_CSV_KEY);
+      if (savedVersion === SPREADSHEET_DATA_VERSION && savedCsv && savedCsv.trim().length > 20) {
+        return savedCsv;
+      }
+      localStorage.setItem(STORAGE_VERSION_KEY, SPREADSHEET_DATA_VERSION);
+      localStorage.setItem(STORAGE_CSV_KEY, INITIAL_SPREADSHEET_CSV);
+    } catch {
+      // ignore storage errors
+    }
+    return INITIAL_SPREADSHEET_CSV;
+  });
+
+  const [sheetUrl, setSheetUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_URL_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [sheetName, setSheetName] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_SHEET_NAME_KEY) || DEFAULT_SHEET_NAME;
+    } catch {
+      return DEFAULT_SHEET_NAME;
+    }
+  });
+
   const [startDay, setStartDay] = useState<number>(1);
   const [endDay, setEndDay] = useState<number>(7);
 
-  // Top 10 tetap aktifkan mode Hide (Default: false / hanya muncul jika diklik)
+  // Top 10 di Dashboard Report tetap aktifkan mode Hide
   const [isTop10OpenDashboard, setIsTop10OpenDashboard] = useState<boolean>(false);
-  const [isTop10OpenAnalisa, setIsTop10OpenAnalisa] = useState<boolean>(false);
   const [showMatrixInDashboard, setShowMatrixInDashboard] = useState<boolean>(false);
 
-  // Rekap Mutasi Sistem & Kartu Stock dikosongkan ulang secara default (Hanya terisi jika ada Upload)
+  // Data Mutasi Sistem & Kartu Stock (Kosong secara default kecuali ada upload)
   const [systemMutations, setSystemMutations] = useState<SystemMutationRecord[]>(
     INITIAL_SYSTEM_MUTATION_MASTER
   );
-  const [isMutationModalOpen, setIsMutationModalOpen] = useState<boolean>(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
-
-  // Data Kartu Stock Opsional (Kosong secara default kecuali diupload)
   const [stockCards, setStockCards] = useState<AnalyzedStockCard[]>(
     INITIAL_SAMPLE_STOCK_CARDS
   );
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
 
-  // Real-time 30s Auto-Update state
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
-  const [countdown, setCountdown] = useState<number>(30);
+  // Manual Refresh state (Tanpa Auto-Refresh 30 detik)
   const [lastUpdated, setLastUpdated] = useState<Date>(() => new Date());
-  const [syncCycleCount, setSyncCycleCount] = useState<number>(1);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [refreshRevision, setRefreshRevision] = useState<number>(0);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // Parse base spreadsheet
-  const parsed = useMemo(() => parseAndAnalyzeSpreadsheet(csvData), [csvData]);
+  // Parse base spreadsheet (Sinkron otomatis setiap kali csvData berubah atau Refresh manual ditekan)
+  const parsed = useMemo(
+    () => parseAndAnalyzeSpreadsheet(csvData),
+    [csvData, refreshRevision]
+  );
 
-  // Compute period analysis dynamically for [startDay .. endDay] with Baseline 100%
+  // Bila spreadsheet yang baru disinkronkan memiliki tanggal aktif baru yang terisi data (misal tgl 8, 9, dst.),
+  // sesuaikan batas tanggal aktif secara otomatis agar data terbaru langsung tampil
+  useEffect(() => {
+    const populatedSummaries = parsed.dailySummaries.filter(
+      (s) => s.stockFisik > 0 || s.error > 0
+    );
+    if (populatedSummaries.length > 0) {
+      const firstPopulated = populatedSummaries[0].day;
+      const lastPopulated = populatedSummaries[populatedSummaries.length - 1].day;
+      setStartDay((prevStart) =>
+        parsed.activeDays.includes(prevStart) ? prevStart : firstPopulated
+      );
+      setEndDay((prevEnd) => {
+        if (!parsed.activeDays.includes(prevEnd) || lastPopulated > prevEnd) {
+          return lastPopulated;
+        }
+        return prevEnd;
+      });
+    }
+  }, [parsed]);
+
+  // Compute analysis dynamically for [startDay .. endDay] with Baseline 100% (dan tanpa 0% sebagai terendah)
   const periodData = useMemo(
     () => computePeriodDashboardAnalysis(parsed, startDay, endDay),
     [parsed, startDay, endDay]
   );
 
-  // Hanya tampilkan analisa untuk item yang di-search (Default: '' / null sampai user melakukan search atau klik item)
+  // Hanya tampilkan analisa untuk item yang di-search
   const [selectedItemId, setSelectedItemId] = useState<string>('');
 
   const selectedPeriodItem: PeriodItemAnalysis | null = useMemo(() => {
     if (!selectedItemId) return null;
-    return periodData.periodItems.find((p) => p.item.id === selectedItemId) || null;
+    return (
+      periodData.periodItems.find((p) => p.item.id === selectedItemId) ||
+      periodData.periodItems.find(
+        (p) =>
+          p.item.name.toLowerCase().trim() ===
+          selectedItemId.replace(/^item-\d+-/, '').replace(/-/g, ' ').toLowerCase().trim()
+      ) ||
+      null
+    );
   }, [periodData.periodItems, selectedItemId]);
 
-  const availableItemNames = useMemo(
-    () => periodData.periodItems.map((p) => p.item.name),
-    [periodData.periodItems]
+  const applyAndPersistSpreadsheet = useCallback(
+    (newCsv: string, newUrl: string, newSheetName: string = DEFAULT_SHEET_NAME) => {
+      setCsvData(newCsv);
+      setSheetUrl(newUrl);
+      setSheetName(newSheetName || DEFAULT_SHEET_NAME);
+      setRefreshRevision((r) => r + 1);
+      setLastUpdated(new Date());
+      try {
+        localStorage.setItem(STORAGE_VERSION_KEY, SPREADSHEET_DATA_VERSION);
+        localStorage.setItem(STORAGE_CSV_KEY, newCsv);
+        localStorage.setItem(STORAGE_URL_KEY, newUrl);
+        localStorage.setItem(STORAGE_SHEET_NAME_KEY, newSheetName || DEFAULT_SHEET_NAME);
+      } catch {
+        // ignore storage errors
+      }
+    },
+    []
   );
 
-  const triggerRefresh = useCallback(async () => {
+  // Manual Refresh Handler: Sinkronkan ulang data dari Spreadsheet (Sheet rekap Daily)
+  const triggerManualRefresh = useCallback(async () => {
     setIsRefreshing(true);
+    setSyncNotice(null);
     try {
-      if (sheetUrl) {
-        const res = await fetch(sheetUrl, { cache: 'no-store' });
+      if (sheetUrl.trim()) {
+        const res = await fetch('/api/fetch-spreadsheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: sheetUrl.trim(),
+            sheetName: sheetName || DEFAULT_SHEET_NAME,
+          }),
+        });
         if (res.ok) {
-          const text = await res.text();
-          if (text && text.trim().length > 20) {
-            setCsvData(text);
+          const data = await res.json();
+          if (data?.csvText && data.csvText.trim().length > 10) {
+            applyAndPersistSpreadsheet(data.csvText, sheetUrl.trim(), sheetName);
+            const reParsed = parseAndAnalyzeSpreadsheet(data.csvText);
+            setSyncNotice(
+              `Data terupdate dari Sheet "${sheetName || DEFAULT_SHEET_NAME}" (${reParsed.items.length} item)`
+            );
+            setTimeout(() => setSyncNotice(null), 4000);
+            return;
           }
         }
       }
+      // Jika belum ada link eksternal, pastikan base data terbaru Sheet rekap Daily dievaluasi ulang
+      setRefreshRevision((r) => r + 1);
       setLastUpdated(new Date());
-      setSyncCycleCount((c) => c + 1);
-      setCountdown(30);
+      setSyncNotice(
+        `Data disinkronkan: Sheet "${sheetName || DEFAULT_SHEET_NAME}" (${parsed.items.length} item)`
+      );
+      setTimeout(() => setSyncNotice(null), 3500);
     } catch {
+      setRefreshRevision((r) => r + 1);
       setLastUpdated(new Date());
-      setCountdown(30);
     } finally {
       setTimeout(() => setIsRefreshing(false), 180);
     }
-  }, [sheetUrl]);
-
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          triggerRefresh();
-          return 30;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [autoRefreshEnabled, triggerRefresh]);
+  }, [sheetUrl, sheetName, applyAndPersistSpreadsheet, parsed.items.length]);
 
   const handleSelectItemAndOpenAnalisa = (p: PeriodItemAnalysis) => {
     setSelectedItemId(p.item.id);
@@ -136,7 +218,7 @@ export default function App() {
 
   const handleUpdateMutationMaster = (
     newRecords: SystemMutationRecord[],
-    replaceAll: boolean
+    replaceAll: boolean = false
   ) => {
     setSystemMutations((prev) => (replaceAll ? newRecords : [...newRecords, ...prev]));
   };
@@ -160,34 +242,32 @@ export default function App() {
     });
   };
 
-  const handleClearAllUploads = () => {
-    setSystemMutations([]);
-    setStockCards([]);
-  };
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Bar Contract: Ringkas Menjadi 2 Opsi Menu Besar (1. Dashboard Report | 2. Analisa) */}
-      <header className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 bg-slate-950/95 backdrop-blur border-b border-slate-800">
+    <div className="min-h-screen bg-[#EEF2EE] text-[#1C2822] flex flex-col">
+      {/* Top Bar Contract: 3 Zones (Brand | 2 Main Menu Options | Manual Refresh & Data Spreadsheet) */}
+      <header className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 bg-white/95 backdrop-blur border-b border-[#C5D3C9]">
         {/* Zone 1: Brand Title */}
         <div className="flex items-center gap-3">
-          <span className="text-lg font-bold tracking-tight text-slate-100">
+          <span className="text-lg font-bold tracking-tight text-[#1E3329]">
             Bangor Inventory
+          </span>
+          <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-[#E8EFEA] text-[#2D5A43] border border-[#C5D3C9]">
+            Sheet: {sheetName || DEFAULT_SHEET_NAME} ({parsed.items.length} Item)
           </span>
         </div>
 
         {/* Zone 2: 2 OPSI BESAR MENU UTAMA (Dashboard Report & Analisa) */}
         <nav
           aria-label="Menu Utama"
-          className="flex items-center gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl"
+          className="flex items-center gap-1.5 p-1 bg-[#E6EFE9] border border-[#C5D3C9] rounded-xl"
         >
           <button
             type="button"
             onClick={() => setActiveMenu('dashboard_report')}
             className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${
               activeMenu === 'dashboard_report'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/70'
+                ? 'bg-[#2D5A43] text-white shadow-sm'
+                : 'text-[#3B5246] hover:text-[#1C2822] hover:bg-[#DCE7E0]'
             }`}
           >
             <BarChart3 className="w-4 h-4" />
@@ -199,8 +279,8 @@ export default function App() {
             onClick={() => setActiveMenu('analisa')}
             className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap ${
               activeMenu === 'analisa'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/70'
+                ? 'bg-[#2D5A43] text-white shadow-sm'
+                : 'text-[#3B5246] hover:text-[#1C2822] hover:bg-[#DCE7E0]'
             }`}
           >
             <FileSearch className="w-4 h-4" />
@@ -208,75 +288,57 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: Real-time 30s Auto-Update & Upload Mutasi */}
+        {/* Zone 3: Tombol Refresh Manual & Sumber Spreadsheet */}
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={() => setAutoRefreshEnabled((v) => !v)}
-            title={autoRefreshEnabled ? 'Jeda Auto-Update 30s' : 'Aktifkan Auto-Update 30s'}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap ${
-              autoRefreshEnabled
-                ? 'bg-emerald-950/60 border-emerald-700/80 text-emerald-300'
-                : 'bg-slate-900 border-slate-700 text-slate-400'
-            }`}
+            onClick={triggerManualRefresh}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#2D5A43] hover:bg-[#234735] text-white rounded-xl transition-colors whitespace-nowrap shadow-sm"
           >
-            {autoRefreshEnabled ? (
-              <Pause className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Play className="w-3.5 h-3.5 text-slate-400" />
-            )}
-            <span className="font-mono tabular-nums">
-              {autoRefreshEnabled ? `${String(countdown).padStart(2, '0')}s` : 'Paused'}
-            </span>
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
+            />
+            <span>Refresh</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setIsMutationModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-lg transition-colors whitespace-nowrap"
+            onClick={() => setIsSyncModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E6EFE9] hover:bg-[#DCE7E0] border border-[#B8C9BE] text-[#1E3329] rounded-xl transition-colors whitespace-nowrap"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Upload Mutasi</span>
+            <FileSpreadsheet className="w-3.5 h-3.5 text-[#2D5A43]" />
+            <span>Spreadsheet</span>
           </button>
         </div>
       </header>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-6 space-y-6">
-        {/* Compact Status & Period Info Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+        {/* Compact Status Info Strip (Unboxed text metadata with · separators) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#4A5D52]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-emerald-400 font-semibold">Baseline: 100%</span>
+            <span className="text-[#1E6F43] font-semibold">Baseline Akurasi: 100%</span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums">
-              Auto-Update: {lastUpdated.toLocaleTimeString('id-ID')} (#{syncCycleCount})
+            <span>
+              Base Data: <strong className="text-[#1E3329]">Sheet {sheetName || DEFAULT_SHEET_NAME}</strong> ({parsed.items.length} Item)
             </span>
             <span aria-hidden="true">·</span>
             <span>
-              Rekap Mutasi: {systemMutations.length} Baris · Kartu Stock: {stockCards.length}
+              Tanggal Spreadsheet: 1–{parsed.activeDays[parsed.activeDays.length - 1] || 31}{' '}
+              {parsed.monthLabel}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums">
+              Sinkron Terakhir: {lastUpdated.toLocaleTimeString('id-ID')}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={triggerRefresh}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-lg transition-colors"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : ''}`}
-              />
-              <span>Refresh</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSyncModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-lg transition-colors"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-              <span>Data SO</span>
-            </button>
-          </div>
+          {syncNotice && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#E6F4EA] border border-[#9AD0AE] text-[#1E6F43] font-semibold text-xs">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{syncNotice}</span>
+            </div>
+          )}
         </div>
 
         {/* ===================================================================== */}
@@ -284,8 +346,10 @@ export default function App() {
         {/* ===================================================================== */}
         {activeMenu === 'dashboard_report' && (
           <div className="space-y-6">
-            {/* 1. Persentase Akurasi & Hasil Analisa Rata-Rata */}
+            {/* 1. Persentase Akurasi & Hasil Analisa Rata-Rata + Pilihan Tanggal Mutasi */}
             <PeriodAverageAccuracyHero
+              availableDays={parsed.activeDays}
+              monthLabel={parsed.monthLabel}
               startDay={periodData.startDay}
               endDay={periodData.endDay}
               onChangeRange={(s, e) => {
@@ -301,11 +365,23 @@ export default function App() {
               lowestDaySummary={periodData.lowestDaySummary}
               highestDaySummary={periodData.highestDaySummary}
               periodSummaries={periodData.periodSummaries}
+              allDailySummaries={parsed.dailySummaries}
               periodItems={periodData.periodItems}
               onSelectItemAnalysis={handleSelectItemAndOpenAnalisa}
             />
 
-            {/* 2. Top 10 (Mode Hide Aktif - Hanya Muncul Jika Diklik) */}
+            {/* 2. Grafik Akurasi per Tanggal & Grafik Opsional Per Item (Hanya Muncul Jika Di-Klik) */}
+            <DashboardChartsSection
+              periodSummaries={periodData.periodSummaries}
+              periodItems={periodData.periodItems}
+              startDay={periodData.startDay}
+              endDay={periodData.endDay}
+              monthLabel={parsed.monthLabel}
+              lowestDaySummary={periodData.lowestDaySummary}
+              onSelectItemAnalysis={handleSelectItemAndOpenAnalisa}
+            />
+
+            {/* 3. Top 10 (Mode Hide Aktif - Hanya di Dashboard Report, 0% dikecualikan) */}
             <Top10ErrorSection
               periodItems={periodData.periodItems}
               startDay={periodData.startDay}
@@ -318,16 +394,16 @@ export default function App() {
               onToggleOpen={() => setIsTop10OpenDashboard((prev) => !prev)}
             />
 
-            {/* 3. Opsi Buka Tabel Rekap SO & Akurasi Bawah */}
+            {/* 3. Opsi Buka Tabel Rekap SO & Stock Accuracy */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between border border-slate-800 bg-slate-900/60 rounded-xl px-5 py-3.5">
-                <span className="text-xs font-semibold text-slate-300">
-                  Tabel Rekap Spreadsheet SO vs Accurate (1–7 Oktober)
+              <div className="flex items-center justify-between border border-[#C5D3C9] bg-white rounded-2xl px-5 py-3.5 shadow-sm">
+                <span className="text-xs font-semibold text-[#1C2822]">
+                  Tabel Rekap Sheet rekap Daily — SO vs Accurate ({startDay}–{endDay} Okt)
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowMatrixInDashboard((v) => !v)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-[#E8EFEA] hover:bg-[#DCE7E0] text-[#1E3329] rounded-xl border border-[#B8C9BE]"
                 >
                   <span>{showMatrixInDashboard ? 'Sembunyikan Tabel' : 'Tampilkan Tabel SO'}</span>
                   {showMatrixInDashboard ? (
@@ -342,6 +418,8 @@ export default function App() {
                 <SpreadsheetMatrixTable
                   items={parsed.items}
                   dailySummaries={parsed.dailySummaries}
+                  startDay={periodData.startDay}
+                  endDay={periodData.endDay}
                   selectedItemId={selectedPeriodItem?.item.id || ''}
                   onSelectItem={(item) => {
                     const found = periodData.periodItems.find((p) => p.item.id === item.id);
@@ -354,92 +432,65 @@ export default function App() {
         )}
 
         {/* ===================================================================== */}
-        {/* OPSI MENU 2: ANALISA                                                  */}
-        {/* Berisi:                                                               */}
-        {/* - Top 10 (Tetap Aktifkan Mode Hide)                                   */}
-        {/* - Opsi Pilihan Tanggal & Nama Item                                    */}
-        {/* - Kolom Upload Mutasi (Tanggal | Nomor | Deksripsi | Masuk | Keluar)  */}
-        {/* - Kolom Upload Kartu Stock Opsional                                   */}
-        {/* - Kolom Hasil Analisa (Hanya untuk Item yang di-Search)               */}
+        {/* OPSI MENU 2: ANALISA (Tanpa Top 10)                                   */}
+        {/* Urutan:                                                               */}
+        {/* 1. Upload Mutasi Sistem & Upload Kartu Stock (Hanya "Upload berhasil")*/}
+        {/* 2. Search Bar Item + Pilihan Tanggal Mutasi                           */}
+        {/*    + Filter: Tampilkan semua / Tampilkan hanya selisih                */}
+        {/*    + Tombol Breakdown per tanggal (Baseline SO tgl 1 - Out tgl 2 = SO tgl 2,*/}
+        {/*      Kecocokan Tanggal & Qty IN-OUT, 3 Kemungkinan Perluasan Logika)  */}
         {/* ===================================================================== */}
         {activeMenu === 'analisa' && (
-          <div className="space-y-6">
-            {/* 1. Top 10 (Tetap aktifkan mode Hide - Hanya muncul jika diklik) */}
-            <Top10ErrorSection
-              periodItems={periodData.periodItems}
-              startDay={periodData.startDay}
-              endDay={periodData.endDay}
-              selectedItemId={selectedPeriodItem?.item.id || ''}
-              onSelectItemAnalysis={(p) => {
-                setSelectedItemId(p.item.id);
-                const el = document.getElementById('item-historical-analysis');
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }}
-              systemMutations={systemMutations}
-              stockCards={stockCards}
-              isOpen={isTop10OpenAnalisa}
-              onToggleOpen={() => setIsTop10OpenAnalisa((prev) => !prev)}
-            />
-
-            {/* 2. Pilihan Tanggal & Nama Item + Kolom Upload Mutasi + Kolom Upload Kartu Stock + Hasil Analisa Hanya Item Search */}
-            <TransactionBreakdownPanel
-              selectedAnalysis={selectedPeriodItem}
-              allPeriodItems={periodData.periodItems.filter(
-                (p) => p.periodSelisih > 0 || p.periodSO > 0
-              )}
-              startDay={periodData.startDay}
-              endDay={periodData.endDay}
-              onChangeRange={(s, e) => {
-                setStartDay(s);
-                setEndDay(e);
-              }}
-              onSelectItemAnalysis={(p) => setSelectedItemId(p ? p.item.id : '')}
-              systemMutations={systemMutations}
-              onUpdateMutationRecords={handleUpdateMutationMaster}
-              stockCards={stockCards}
-              onSaveStockCard={handleSaveStockCard}
-              onClearAllUploads={handleClearAllUploads}
-              onOpenMutationUploadModal={() => setIsMutationModalOpen(true)}
-            />
-          </div>
+          <TransactionBreakdownPanel
+            selectedAnalysis={selectedPeriodItem}
+            allPeriodItems={periodData.periodItems}
+            availableDays={parsed.activeDays}
+            monthLabel={parsed.monthLabel}
+            dailySummaries={parsed.dailySummaries}
+            startDay={periodData.startDay}
+            endDay={periodData.endDay}
+            onChangeRange={(s, e) => {
+              setStartDay(s);
+              setEndDay(e);
+            }}
+            onSelectItemAnalysis={(p) => setSelectedItemId(p ? p.item.id : '')}
+            systemMutations={systemMutations}
+            onUpdateMutationRecords={handleUpdateMutationMaster}
+            stockCards={stockCards}
+            onSaveStockCard={handleSaveStockCard}
+          />
         )}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 px-6 py-4 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between max-w-[1440px] w-full mx-auto">
-        <span>Bangor Inventory · Baseline Akurasi 100%</span>
-        <span>Auto-Update 30s · Periode: {startDay}–{endDay} Okt</span>
+      <footer className="border-t border-[#D2DED6] px-6 py-4 text-xs text-[#526358] flex flex-col sm:flex-row items-center justify-between max-w-[1440px] w-full mx-auto">
+        <span>Bangor Inventory · Sheet rekap Daily · Baseline Akurasi 100%</span>
+        <span>
+          Tanggal Mutasi: {startDay}–{endDay} {parsed.monthLabel}
+        </span>
       </footer>
 
-      {/* Modal 1: Upload Master Mutasi Barang (5 Kolom Horizontal) */}
-      <SystemMutationMasterModal
-        isOpen={isMutationModalOpen}
-        onClose={() => setIsMutationModalOpen(false)}
-        records={systemMutations}
-        onUpdateRecords={handleUpdateMutationMaster}
-        defaultTargetItem={selectedPeriodItem?.item.name || 'Semua Item'}
-        defaultDay={selectedPeriodItem?.lowestAccuracyDayRecord?.day || 5}
-        availableItemNames={availableItemNames}
-      />
-
-      {/* Modal 2: Data SO */}
+      {/* Modal Sinkronisasi Spreadsheet */}
       <SpreadsheetSyncModal
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
         currentCsv={csvData}
         sheetUrl={sheetUrl}
-        onApplyCsv={(newCsv, newUrl) => {
-          setCsvData(newCsv);
-          setSheetUrl(newUrl);
-          setLastUpdated(new Date());
-          setSyncCycleCount((c) => c + 1);
-          setCountdown(30);
+        sheetName={sheetName}
+        onApplyCsv={(newCsv, newUrl, newSheetName) => {
+          applyAndPersistSpreadsheet(newCsv, newUrl, newSheetName);
+          const reParsed = parseAndAnalyzeSpreadsheet(newCsv);
+          setSyncNotice(
+            `Spreadsheet berhasil diupdate (${reParsed.items.length} item — Sheet ${
+              newSheetName || DEFAULT_SHEET_NAME
+            })`
+          );
+          setTimeout(() => setSyncNotice(null), 4000);
         }}
         onResetDefault={() => {
-          setCsvData(INITIAL_SPREADSHEET_CSV);
-          setSheetUrl('');
-          setLastUpdated(new Date());
-          setCountdown(30);
+          applyAndPersistSpreadsheet(INITIAL_SPREADSHEET_CSV, '', DEFAULT_SHEET_NAME);
+          setSyncNotice('Dikembalikan ke Base Data Sheet rekap Daily (137 item)');
+          setTimeout(() => setSyncNotice(null), 4000);
         }}
       />
     </div>

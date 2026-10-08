@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import {
   AnalyzedStockCard,
+  CriteriaBreakdownDetail,
   DailyAccuracySummary,
   DailyRecord,
   InventoryItem,
@@ -11,15 +12,20 @@ import {
   VarianceDateMutationComparison,
 } from '../types/inventory';
 
-function parseCsvLine(line: string): string[] {
+function parseCsvLine(line: string, delimiter: string = ','): string[] {
   const result: string[] = [];
   let current = '';
   let inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === delimiter && !inQuotes) {
       result.push(current.trim());
       current = '';
     } else {
@@ -30,14 +36,60 @@ function parseCsvLine(line: string): string[] {
   return result;
 }
 
+function detectDelimiter( sampleLines: string[]): string {
+  const firstFew = sampleLines.slice(0, 5).join('\n');
+  const tabCount = (firstFew.match(/\t/g) || []).length;
+  const commaCount = (firstFew.match(/,/g) || []).length;
+  const semiCount = (firstFew.match(/;/g) || []).length;
+  if (tabCount > commaCount && tabCount > semiCount) return '\t';
+  if (semiCount > commaCount && semiCount > tabCount) return ';';
+  return ',';
+}
+
 function parseIndoNumber(val: string | undefined): number | null {
-  if (!val || val.trim() === '' || val.trim() === '-') return null;
-  const cleaned = val
-    .replace(/%/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .trim();
-  const num = Number(cleaned);
+  if (!val) return null;
+  const raw = val.replace(/^["']+|["']+$/g, '').trim();
+  if (
+    !raw ||
+    raw === '-' ||
+    raw.toUpperCase() === '#N/A' ||
+    raw.toUpperCase() === '#REF!' ||
+    raw.toUpperCase() === '#DIV/0!' ||
+    raw.toUpperCase() === '#VALUE!'
+  ) {
+    return null;
+  }
+
+  const isPercent = raw.includes('%');
+  let s = raw.replace(/%/g, '').replace(/\s+/g, '');
+
+  if (isPercent) {
+    // For percentages like "56,30%" or "56.30%", comma or dot is the decimal point
+    s = s.replace(',', '.');
+    const num = Number(s);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  // Indonesian thousands separator: e.g., "1.579" or "143.750" or "-1.500"
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) {
+    s = s.replace(/\./g, '').replace(',', '.');
+    const num = Number(s);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  // US/Standard thousands separator: e.g., "1,579" or "143,750"
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) {
+    s = s.replace(/,/g, '');
+    const num = Number(s);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  // Single comma decimal: e.g., "98,47"
+  if (s.includes(',') && !s.includes('.')) {
+    s = s.replace(',', '.');
+  }
+
+  const num = Number(s);
   return Number.isFinite(num) ? num : null;
 }
 
@@ -284,38 +336,156 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
     .map((l) => l.trimEnd())
     .filter((l) => l.length > 0);
 
+  if (lines.length === 0) {
+    return {
+      monthLabel: 'Oktober 2026',
+      items: [],
+      activeDays: [1, 2, 3, 4, 5, 6, 7],
+      dailySummaries: [],
+      rawAccurateDay5Total: 0,
+      overallStockFisik: 0,
+      overallError: 0,
+      overallWape: 0,
+      overallAccuracy: 100,
+      totalDrasticSpikes: 0,
+    };
+  }
+
+  const delimiter = detectDelimiter(lines);
+
+  // Dynamically scan the first 10 rows to locate the Date header row and the "Nama Item / SO / Accurate" subheader row
+  let dateHeaderRowIdx = 0;
+  let subHeaderRowIdx = 1;
+  let nameColIdx = 0;
+  let uomColIdx = 1;
+
+  for (let idx = 0; idx < Math.min(10, lines.length); idx++) {
+    const rowTokens = parseCsvLine(lines[idx], delimiter);
+    const joined = rowTokens.join(' ').toLowerCase();
+    if (joined.includes('nama item') || (joined.includes('accurate') && joined.includes('selisih'))) {
+      subHeaderRowIdx = idx;
+      dateHeaderRowIdx = Math.max(0, idx - 1);
+      const foundNameIdx = rowTokens.findIndex((c) => /nama\s*item/i.test(c));
+      if (foundNameIdx >= 0) {
+        nameColIdx = foundNameIdx;
+        uomColIdx = foundNameIdx + 1;
+      }
+      break;
+    }
+  }
+
+  const headerRowDate = parseCsvLine(lines[dateHeaderRowIdx], delimiter);
+  const headerRowSub = parseCsvLine(lines[subHeaderRowIdx] || '', delimiter);
+
+  // Extract month name if present (e.g., "Oktober")
+  let rawMonthName = 'Oktober';
+  for (let c = 0; c <= Math.min(3, headerRowDate.length - 1); c++) {
+    const token = (headerRowDate[c] || '').replace(/^["']+|["']+$/g, '').trim();
+    if (/^(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)/i.test(token)) {
+      rawMonthName = token.split(/\s+/)[0];
+      break;
+    }
+  }
+  const shortMonth = rawMonthName.slice(0, 3);
+
+  const dayColMap = new Map<number, number>();
+  const detectedDays: number[] = [];
+
+  // 1) Detect days from the Date Header Row (standard CSV/Sheet export: "1", "2", "3"...)
+  for (let c = uomColIdx + 1; c < headerRowDate.length; c++) {
+    const cellTxt = (headerRowDate[c] || '').replace(/^["']+|["']+$/g, '').trim();
+    const numMatch = cellTxt.match(/^(\d{1,2})(?:\s+so)?$/i);
+    if (numMatch) {
+      const dayNum = Number(numMatch[1]);
+      if (dayNum >= 1 && dayNum <= 31 && !dayColMap.has(dayNum)) {
+        dayColMap.set(dayNum, c);
+        detectedDays.push(dayNum);
+      }
+    }
+  }
+
+  // 2) Support Google Sheets gviz CSV where row 0 and row 1 are merged into subHeaderRow ("1 SO", "2 SO", etc.)
+  if (detectedDays.length === 0) {
+    for (let c = uomColIdx + 1; c < headerRowSub.length; c++) {
+      const cellTxt = (headerRowSub[c] || '').replace(/^["']+|["']+$/g, '').trim();
+      const gvizMatch = cellTxt.match(/^(\d{1,2})\s*SO$/i);
+      if (gvizMatch) {
+        const dayNum = Number(gvizMatch[1]);
+        if (dayNum >= 1 && dayNum <= 31 && !dayColMap.has(dayNum)) {
+          dayColMap.set(dayNum, c);
+          detectedDays.push(dayNum);
+        }
+      }
+    }
+  }
+
+  // 3) Fallback if header row doesn't explicitly list numbers: infer from "SO, Accurate, Selisih" triplets
+  if (detectedDays.length === 0) {
+    let inferredDay = 1;
+    for (let c = uomColIdx + 1; c + 2 < headerRowSub.length; c++) {
+      const c0 = (headerRowSub[c] || '').trim().toLowerCase();
+      const c1 = (headerRowSub[c + 1] || '').trim().toLowerCase();
+      if (c0 === 'so' && c1 === 'accurate' && inferredDay <= 31) {
+        dayColMap.set(inferredDay, c);
+        detectedDays.push(inferredDay);
+        inferredDay++;
+        c += 2;
+      }
+    }
+  }
+
+  const activeDays =
+    detectedDays.length > 0
+      ? detectedDays.sort((a, b) => a - b)
+      : Array.from({ length: 31 }, (_, i) => i + 1);
+
   const items: InventoryItem[] = [];
-  const activeDays = [1, 2, 3, 4, 5, 6, 7];
 
   let stockFisikRow: string[] = [];
   let errorRow: string[] = [];
   let wapeRow: string[] = [];
   let accuracyRow: string[] = [];
+  let reachedSummarySection = false;
 
-  for (let r = 2; r < lines.length; r++) {
-    const cols = parseCsvLine(lines[r]);
-    const col0 = (cols[0] || '').trim();
-    const col1 = (cols[1] || '').trim();
-    const col2 = (cols[2] || '').trim();
+  for (let r = subHeaderRowIdx + 1; r < lines.length; r++) {
+    const cols = parseCsvLine(lines[r], delimiter);
+    const col0 = (cols[nameColIdx] || '').replace(/^["']+|["']+$/g, '').trim();
+    const col1 = (cols[uomColIdx] || '').replace(/^["']+|["']+$/g, '').trim();
 
-    if (col2.toLowerCase() === 'stock fisik') {
+    // Check if any of the first 5 columns is a bottom summary label ('Stock Fisik', 'Error', 'Wape', 'stock Accuracy')
+    const firstFewLower = cols
+      .slice(0, 5)
+      .map((c) => (c || '').replace(/^["']+|["']+$/g, '').trim().toLowerCase());
+
+    if (firstFewLower.includes('stock fisik')) {
       stockFisikRow = cols;
+      reachedSummarySection = true;
       continue;
     }
-    if (col2.toLowerCase() === 'error') {
+    if (firstFewLower.includes('error') && (!col0 || reachedSummarySection)) {
       errorRow = cols;
+      reachedSummarySection = true;
       continue;
     }
-    if (col2.toLowerCase() === 'wape') {
+    if (firstFewLower.includes('wape')) {
       wapeRow = cols;
+      reachedSummarySection = true;
       continue;
     }
-    if (col2.toLowerCase() === 'stock accuracy') {
+    if (firstFewLower.includes('stock accuracy')) {
       accuracyRow = cols;
-      continue;
+      reachedSummarySection = true;
+      // Stop parsing after the main table's 'stock Accuracy' summary row so secondary tables below are not mixed in
+      break;
     }
 
-    if (!col0) continue;
+    if (reachedSummarySection) {
+      break;
+    }
+
+    if (!col0 || col0.toLowerCase() === 'nama item' || col0.toLowerCase() === 'oktober') {
+      continue;
+    }
 
     const daily: DailyRecord[] = [];
     let prevSelisih = 0;
@@ -328,35 +498,54 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
     let hasUninputtedDay7SO = false;
 
     for (const day of activeDays) {
-      const baseIdx = 2 + (day - 1) * 3;
+      const baseIdx = dayColMap.get(day) ?? uomColIdx + 1 + (day - 1) * 3;
       const soVal = parseIndoNumber(cols[baseIdx]);
       const accVal = parseIndoNumber(cols[baseIdx + 1]);
-      const selVal = parseIndoNumber(cols[baseIdx + 2]) ?? 0;
+      const rawSelVal = parseIndoNumber(cols[baseIdx + 2]);
+
+      // Dynamically synchronize Selisih if SO or Accurate changes in the spreadsheet
+      let selVal = rawSelVal ?? 0;
+      if (soVal !== null && accVal !== null) {
+        selVal = Math.abs(soVal - accVal);
+      } else if (rawSelVal !== null && rawSelVal > 0) {
+        selVal = rawSelVal;
+      } else if (soVal !== null && soVal > 0 && accVal === null) {
+        selVal = soVal;
+      } else if ((soVal === null || soVal === 0) && accVal !== null && accVal !== 0) {
+        selVal = Math.abs(accVal);
+      }
+
+      const hasActivityOnDay =
+        (soVal !== null && soVal > 0) ||
+        (accVal !== null && accVal !== 0) ||
+        selVal > 0;
 
       if (accVal !== null && accVal < 0) {
         hasNegativeAccurate = true;
       }
 
       const deltaSO =
-        prevSO !== null && soVal !== null && day !== 4 ? soVal - prevSO : null;
+        prevSO !== null && soVal !== null && hasActivityOnDay ? soVal - prevSO : null;
       const deltaAccurate =
-        prevAcc !== null && accVal !== null && day !== 4 ? accVal - prevAcc : null;
-      const deltaFromPrevSelisih = day === 4 ? 0 : selVal - prevSelisih;
+        prevAcc !== null && accVal !== null && hasActivityOnDay ? accVal - prevAcc : null;
+      const deltaFromPrevSelisih = hasActivityOnDay ? selVal - prevSelisih : 0;
 
       // Calculate Daily Stock Accuracy % against Baseline 100%
       let dailyAccuracyPercent: number | null = null;
       let gapFromBaseline100: number | null = null;
 
-      if (day !== 4) {
-        if (soVal !== null && soVal > 0) {
+      if (hasActivityOnDay) {
+        if (soVal !== null && soVal > 0 && accVal !== null && accVal > 0) {
           const errPct = (selVal / soVal) * 100;
           dailyAccuracyPercent = Number(Math.max(0, 100 - errPct).toFixed(2));
           gapFromBaseline100 = Number((dailyAccuracyPercent - 100).toFixed(2));
+        } else if (soVal !== null && soVal > 0 && accVal === 0 && selVal === 0) {
+          dailyAccuracyPercent = 100;
+          gapFromBaseline100 = 0;
         } else if (selVal > 0 || (accVal !== null && accVal !== 0)) {
-          // SO is 0 or empty while there is variance/system stock -> 0% accuracy on that day
           dailyAccuracyPercent = 0;
           gapFromBaseline100 = -100;
-        } else if (soVal === 0 && (accVal === 0 || accVal === null) && selVal === 0) {
+        } else {
           dailyAccuracyPercent = 100;
           gapFromBaseline100 = 0;
         }
@@ -365,11 +554,11 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
       let isSpike = false;
       let spikeReason = '';
 
-      if (day !== 4 && selVal > 0) {
-        if (day === 7 && (soVal === 0 || soVal === null) && accVal !== null && accVal >= 100) {
+      if (hasActivityOnDay && selVal > 0) {
+        if ((soVal === 0 || soVal === null) && accVal !== null && accVal >= 100) {
           isSpike = true;
-          hasUninputtedDay7SO = true;
-          spikeReason = `SO Fisik 7 Okt = 0 (Belum Input), Accurate = ${accVal.toLocaleString('id-ID')}`;
+          if (day === 7) hasUninputtedDay7SO = true;
+          spikeReason = `SO Fisik ${day} ${shortMonth} = 0 (Belum Input), Accurate = ${accVal.toLocaleString('id-ID')}`;
         } else if (day === 1 && selVal >= 250) {
           isSpike = true;
           spikeReason = `Selisih awal tinggi (${selVal.toLocaleString('id-ID')} ${col1})`;
@@ -397,21 +586,18 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
       let inferredTransactionType: DailyRecord['inferredTransactionType'] = 'ZERO_VARIANCE';
       let transactionNote = 'Stok fisik SO & Accurate seimbang (Akurasi 100% sesuai Baseline).';
 
-      if (day === 4) {
+      if (!hasActivityOnDay) {
         inferredTransactionType = 'HOLIDAY_NO_SO';
-        transactionNote = 'Tanggal 4 Okt tidak ada pengambilan Stock Opname (Cut-off / Libur).';
+        transactionNote = `Tanggal ${day} ${shortMonth} belum ada transaksi / pengambilan Stock Opname di Spreadsheet.`;
       } else if (accVal !== null && accVal < 0) {
         inferredTransactionType = 'NEGATIVE_SYSTEM_STOCK';
         transactionNote = `Stok sistem Accurate minus (${accVal} ${col1}), indikasi pengeluaran diposting sebelum penerimaan barang.`;
-      } else if (day === 7 && (soVal === 0 || soVal === null) && accVal && accVal > 0) {
-        inferredTransactionType = 'UNINPUTTED_SO_CUTOFF';
-        transactionNote = `Kolom SO Fisik masih 0 sedangkan Accurate mencatat ${accVal.toLocaleString('id-ID')} ${col1}. Akurasi jatuh ke 0% (-100% dari Baseline).`;
       } else if ((soVal === 0 || soVal === null) && accVal && accVal > 0) {
-        inferredTransactionType = 'UOM_CONVERSION_GAP';
-        transactionNote = `SO tercatat 0 namun sistem Accurate memiliki saldo ${accVal.toLocaleString('id-ID')} ${col1} (Akurasi 0%).`;
+        inferredTransactionType = day === 7 ? 'UNINPUTTED_SO_CUTOFF' : 'UOM_CONVERSION_GAP';
+        transactionNote = `Kolom SO Fisik tercatat 0 sedangkan Accurate mencatat ${accVal.toLocaleString('id-ID')} ${col1} (Bukan hasil banding karena SO = 0).`;
       } else if (soVal && soVal > 0 && accVal === null) {
         inferredTransactionType = 'UOM_CONVERSION_GAP';
-        transactionNote = `Fisik SO tercatat ${soVal.toLocaleString('id-ID')} ${col1}, namun kolom Accurate kosong/tidak tertarik (Akurasi 0%).`;
+        transactionNote = `Fisik SO tercatat ${soVal.toLocaleString('id-ID')} ${col1}, namun kolom Accurate kosong/tidak tertarik (Bukan hasil banding).`;
       } else if (selVal === 0) {
         if (deltaSO !== null && deltaSO > 0) {
           inferredTransactionType = 'RESTOCK_INBOUND';
@@ -425,7 +611,7 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
         }
       } else {
         inferredTransactionType = 'UNPOSTED_DELIVERY_OR_USAGE';
-        const diffSign = (soVal ?? 0) > (accVal ?? 0) ? 'Fisik > Sistem' : 'Sistem > Fisik';
+        const diffSign = (soVal ?? 0) > (accVal ?? 0) ? 'Fisik > Accurate' : 'Accurate > Fisik';
         const deltaDesc: string[] = [];
         if (deltaSO !== null) {
           deltaDesc.push(`Mutasi SO: ${deltaSO >= 0 ? '+' : ''}${deltaSO.toLocaleString('id-ID')}`);
@@ -440,7 +626,7 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
 
       daily.push({
         day,
-        dateLabel: `${day} Okt`,
+        dateLabel: `${day} ${shortMonth}`,
         so: soVal,
         accurate: accVal,
         selisih: selVal,
@@ -455,20 +641,26 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
         transactionNote,
       });
 
-      if (day !== 4) {
+      if (hasActivityOnDay) {
         prevSelisih = selVal;
-        if (soVal !== null) prevSO = soVal;
-        if (accVal !== null) prevAcc = accVal;
+        if (soVal !== null && soVal > 0) prevSO = soVal;
+        if (accVal !== null && accVal !== 0) prevAcc = accVal;
       }
     }
 
     const len = cols.length;
+    const computedTotalSelisih = daily.reduce((s, d) => s + d.selisih, 0);
+    const computedTotalSO = daily.reduce((s, d) => s + (d.so ?? 0), 0);
     const totalSelisih =
-      parseIndoNumber(cols[len - 3]) ?? daily.reduce((s, d) => s + d.selisih, 0);
+      computedTotalSelisih > 0
+        ? computedTotalSelisih
+        : parseIndoNumber(cols[len - 3]) ?? 0;
     const totalSO =
-      parseIndoNumber(cols[len - 2]) ?? daily.reduce((s, d) => s + (d.so ?? 0), 0);
+      computedTotalSO > 0
+        ? computedTotalSO
+        : parseIndoNumber(cols[len - 2]) ?? 0;
     const totalAccurate = daily.reduce((s, d) => s + (d.accurate ?? 0), 0);
-    const sheetRightmostErrorCol = (cols[len - 1] || '').trim();
+    const sheetRightmostErrorCol = (cols[len - 1] || '').replace(/^["']+|["']+$/g, '').trim();
     const sheetAccuracyPercent = parseIndoNumber(sheetRightmostErrorCol);
 
     const hasZeroSOButActiveAccurate = totalSO === 0 && totalSelisih > 0;
@@ -503,8 +695,13 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
       totalSO,
       totalAccurate,
       sheetRightmostErrorCol:
-        sheetRightmostErrorCol || (totalSO === 0 && totalSelisih > 0 ? '0,00% (SO=0)' : '100,00%'),
-      sheetAccuracyPercent,
+        sheetRightmostErrorCol ||
+        (totalSO > 0
+          ? `${baselineAccuracyPercent.toFixed(2).replace('.', ',')}%`
+          : totalSelisih > 0
+          ? '0,00% (SO=0)'
+          : '100,00%'),
+      sheetAccuracyPercent: sheetAccuracyPercent ?? (totalSO > 0 ? baselineAccuracyPercent : null),
       errorRatePercent,
       baselineAccuracyPercent,
       maxDailySpike,
@@ -519,32 +716,64 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
     });
   }
 
-  const dailySummaries: DailyAccuracySummary[] = activeDays.map((day) => {
-    const valIdx = 3 + (day - 1) * 3;
-    const stockFisik = parseIndoNumber(stockFisikRow[valIdx]) ?? 0;
-    const error = parseIndoNumber(errorRow[valIdx]) ?? 0;
-    const wapeStr = (wapeRow[valIdx] || '-').trim();
-    const wapeNum = parseIndoNumber(wapeStr);
-    const stockAccuracyStr = (accuracyRow[valIdx] || '-').trim();
-    const stockAccuracyNum = parseIndoNumber(stockAccuracyStr);
+  // Build dailySummaries across ALL dates in activeDays, dynamically syncing with live item totals
+  const dailySummaries: DailyAccuracySummary[] = activeDays.map((day, dayIdx) => {
+    const baseIdx = dayColMap.get(day) ?? uomColIdx + 1 + (day - 1) * 3;
+    const valIdx = baseIdx + 1;
+
+    const sheetFisik = parseIndoNumber(stockFisikRow[valIdx]) ?? 0;
+    const sheetError = parseIndoNumber(errorRow[valIdx]) ?? 0;
+    const computedFisik = items.reduce((s, it) => s + (it.daily[dayIdx]?.so ?? 0), 0);
+    const computedError = items.reduce((s, it) => s + (it.daily[dayIdx]?.selisih ?? 0), 0);
+
+    // Always use live computed totals when items have activity so any spreadsheet edit updates immediately
+    const stockFisik = computedFisik > 0 ? computedFisik : sheetFisik;
+    const error = computedError > 0 ? computedError : sheetError;
+
+    const rawWapeStr = (wapeRow[valIdx] || '').replace(/^["']+|["']+$/g, '').trim();
+    const rawAccStr = (accuracyRow[valIdx] || '').replace(/^["']+|["']+$/g, '').trim();
+
+    let wapeNum = parseIndoNumber(rawWapeStr);
+    let stockAccuracyNum = parseIndoNumber(rawAccStr);
+
+    if (stockFisik > 0) {
+      wapeNum = Number(((error / stockFisik) * 100).toFixed(2));
+      stockAccuracyNum = Number(Math.max(0, 100 - wapeNum).toFixed(2));
+    } else if (error > 0) {
+      wapeNum = 100;
+      stockAccuracyNum = 0;
+    }
+
+    const wapeStr =
+      wapeNum !== null ? `${wapeNum.toFixed(2).replace('.', ',')}%` : rawWapeStr || '-';
+    const stockAccuracyStr =
+      stockAccuracyNum !== null
+        ? `${stockAccuracyNum.toFixed(2).replace('.', ',')}%`
+        : rawAccStr
+        ? `${rawAccStr.replace('%', '')}%`
+        : '-';
+
     const gapFromBaseline100 =
       stockAccuracyNum !== null ? Number((stockAccuracyNum - 100).toFixed(2)) : null;
 
     return {
       day,
-      dateLabel: `${day} Okt`,
+      dateLabel: `${day} ${shortMonth}`,
       stockFisik,
       error,
       wapeStr,
       wapeNum,
-      stockAccuracyStr: stockAccuracyStr ? `${stockAccuracyStr.replace('%', '')}%` : '-',
+      stockAccuracyStr,
       stockAccuracyNum,
       gapFromBaseline100,
       isDrasticDrop: (wapeNum !== null && wapeNum >= 3.0) || error >= 25000,
     };
   });
 
-  const activeSummaries = dailySummaries.filter((d) => d.stockFisik > 0);
+  // Only include days that actually have valid comparison data (stockFisik > 0 and stockAccuracyNum > 0)
+  const activeSummaries = dailySummaries.filter(
+    (d) => d.stockFisik > 0 && d.stockAccuracyNum !== null && d.stockAccuracyNum > 0
+  );
   const overallStockFisik = activeSummaries.reduce((s, d) => s + d.stockFisik, 0);
   const overallError = activeSummaries.reduce((s, d) => s + d.error, 0);
   const overallWape =
@@ -553,7 +782,7 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
   const totalDrasticSpikes = items.reduce((s, it) => s + it.spikeCount, 0);
 
   return {
-    monthLabel: 'Oktober 2026',
+    monthLabel: `${rawMonthName} 2026`,
     items,
     activeDays,
     dailySummaries,
@@ -566,7 +795,8 @@ export function parseAndAnalyzeSpreadsheet(csvText: string): ParsedSpreadsheetDa
   };
 }
 
-// Compute dynamic Period Analysis for any selected date range [startDay .. endDay]
+// Compute dynamic Dashboard & Item Analysis for selected date(s) [startDay .. endDay]
+// Rule: Jangan masukkan 0% sebagai Terendah, cari yang benar-benar hasil banding (SO > 0 & Accurate != 0 & Akurasi > 0%)
 export function computePeriodDashboardAnalysis(
   data: ParsedSpreadsheetData,
   startDay: number,
@@ -575,15 +805,14 @@ export function computePeriodDashboardAnalysis(
   const minDay = Math.min(startDay, endDay);
   const maxDay = Math.max(startDay, endDay);
 
-  // Filter daily summaries within [minDay..maxDay]
   const periodSummaries = data.dailySummaries.filter(
     (d) => d.day >= minDay && d.day <= maxDay
   );
+  // Hanya hari yang benar-benar ada hasil banding (stockFisik > 0 dan stockAccuracyNum > 0)
   const activePeriodSummaries = periodSummaries.filter(
-    (d) => d.stockAccuracyNum !== null && d.stockFisik > 0
+    (d) => d.stockAccuracyNum !== null && d.stockAccuracyNum > 0 && d.stockFisik > 0
   );
 
-  // Average Stock Accuracy across the selected dates (mean of daily Stock Accuracy %)
   const averagePeriodAccuracy =
     activePeriodSummaries.length > 0
       ? Number(
@@ -594,7 +823,6 @@ export function computePeriodDashboardAnalysis(
         )
       : 100;
 
-  // Weighted Stock Accuracy (100 - sum(Error)/sum(StockFisik)*100)
   const periodTotalFisik = activePeriodSummaries.reduce((s, d) => s + d.stockFisik, 0);
   const periodTotalError = activePeriodSummaries.reduce((s, d) => s + d.error, 0);
   const periodWape =
@@ -603,11 +831,12 @@ export function computePeriodDashboardAnalysis(
 
   const gapFromBaseline100 = Number((averagePeriodAccuracy - 100).toFixed(2));
 
-  // Find lowest & highest accuracy days in the selected period
+  // Cari hari dengan akurasi terendah & tertinggi yang benar-benar hasil banding (> 0%)
   let lowestDaySummary: DailyAccuracySummary | null = null;
   let highestDaySummary: DailyAccuracySummary | null = null;
 
   for (const s of activePeriodSummaries) {
+    if ((s.stockAccuracyNum ?? 0) <= 0) continue;
     if (
       !lowestDaySummary ||
       (s.stockAccuracyNum ?? 100) < (lowestDaySummary.stockAccuracyNum ?? 100)
@@ -622,20 +851,22 @@ export function computePeriodDashboardAnalysis(
     }
   }
 
-  // Compute per-item metrics strictly within [minDay..maxDay]
+  // Compute per-item metrics within [minDay..maxDay]
   const periodItems: PeriodItemAnalysis[] = data.items.map((item) => {
     const rawSlice = item.daily.filter((d) => d.day >= minDay && d.day <= maxDay);
 
     let periodSO = 0;
     let periodAccurate = 0;
     let periodSelisih = 0;
+    let comparedSO = 0;
+    let comparedSelisih = 0;
+    let comparedDaysCount = 0;
     let activeDaysCount = 0;
 
     let lowestAccRec: DailyRecord | null = null;
     let highestSelRec: DailyRecord | null = null;
 
     for (const d of rawSlice) {
-      if (d.day === 4) continue;
       const so = d.so ?? 0;
       const acc = d.accurate ?? 0;
       const sel = d.selisih;
@@ -644,23 +875,42 @@ export function computePeriodDashboardAnalysis(
       periodAccurate += acc;
       periodSelisih += sel;
 
+      // Hari yang benar-benar ada hasil banding: SO > 0 DAN Accurate ada nilai (!== null && !== 0)
+      const isRealComparisonDay =
+        d.so !== null && d.so > 0 && d.accurate !== null && d.accurate !== 0;
+
+      if (isRealComparisonDay) {
+        comparedSO += so;
+        comparedSelisih += sel;
+        comparedDaysCount++;
+      }
+
       if (so > 0 || acc !== 0 || sel > 0) {
         activeDaysCount++;
+
+        // Jangan masukkan 0% sebagai Terendah! Hanya pilih hari yang benar-benar hasil banding (isRealComparisonDay & dailyAccuracyPercent > 0)
         if (
-          !lowestAccRec ||
-          (d.dailyAccuracyPercent ?? 100) < (lowestAccRec.dailyAccuracyPercent ?? 100) ||
-          ((d.dailyAccuracyPercent ?? 100) === (lowestAccRec.dailyAccuracyPercent ?? 100) &&
-            d.selisih > lowestAccRec.selisih)
+          isRealComparisonDay &&
+          d.dailyAccuracyPercent !== null &&
+          d.dailyAccuracyPercent > 0
         ) {
-          lowestAccRec = d;
+          if (
+            !lowestAccRec ||
+            d.dailyAccuracyPercent < (lowestAccRec.dailyAccuracyPercent ?? 100) ||
+            (d.dailyAccuracyPercent === (lowestAccRec.dailyAccuracyPercent ?? 100) &&
+              d.selisih > lowestAccRec.selisih)
+          ) {
+            lowestAccRec = d;
+          }
         }
+
         if (!highestSelRec || d.selisih > highestSelRec.selisih) {
           highestSelRec = d;
         }
       }
     }
 
-    // Mark lowest accuracy day inside periodDaily
+    // Mark lowest accuracy day inside periodDaily (only > 0% real comparison day)
     const periodDaily = rawSlice.map((d) => ({
       ...d,
       isLowestAccuracyDay:
@@ -672,10 +922,23 @@ export function computePeriodDashboardAnalysis(
     let periodErrorRatePercent = 0;
     let periodAccuracyPercent = 100;
 
-    if (periodSO > 0) {
+    if (comparedDaysCount > 0 && comparedSO > 0) {
+      // Gunakan hasil banding nyata jika tersedia; apabila 1-7 Okt penuh dan sheet punya angka akurasi > 0%, sinkronkan
+      const rawRate = Number(((periodSelisih / periodSO) * 100).toFixed(2));
+      const rawAcc = Number(Math.max(0, 100 - rawRate).toFixed(2));
+      if (rawAcc > 0) {
+        periodErrorRatePercent = rawRate;
+        periodAccuracyPercent = rawAcc;
+      } else {
+        // Jika hari cut-off (SO=0) menarik total ke 0%, gunakan akurasi dari hari-hari yang benar-benar terbanding
+        periodErrorRatePercent = Number(((comparedSelisih / comparedSO) * 100).toFixed(2));
+        periodAccuracyPercent = Number(Math.max(0, 100 - periodErrorRatePercent).toFixed(2));
+      }
+    } else if (periodSO > 0 && periodAccurate > 0) {
       periodErrorRatePercent = Number(((periodSelisih / periodSO) * 100).toFixed(2));
       periodAccuracyPercent = Number(Math.max(0, 100 - periodErrorRatePercent).toFixed(2));
     } else if (periodSelisih > 0) {
+      // Bukan hasil banding (salah satu SO=0 atau Accurate=0 -> 0%)
       periodErrorRatePercent = 100;
       periodAccuracyPercent = 0;
     }
@@ -718,19 +981,23 @@ export const INITIAL_SYSTEM_MUTATION_MASTER: SystemMutationRecord[] = [];
 export const INITIAL_SAMPLE_STOCK_CARDS: AnalyzedStockCard[] = [];
 
 // Logika Analisa Hasil Banding Based On Search Item:
-// - Tanggal Selisih, Jumlah Selisih, dan Tipe Selisih
-// - Dibanding dengan Data Mutasi (Tanggal | Nomor | Deksripsi | Masuk | Keluar) & Kartu Stock (jika ada upload di tgl tersebut)
-// - Temukan Potensi Selisih berdasar Analisa Tanggal, Jenis Transaksi, dan Jumlah
-// - Rekomendasi Penyelesaian
+// 1. Baseline Hitungan: SO tgl 1 - Data Out tgl 2 = SO tgl 2
+// 2. Kecocokan Tanggal & Kecocokan Total Qty IN - OUT
+// 3. Perluasan Logika:
+//    - Fisik Keluar tanpa data Accurate
+//    - Accurate keluar tapi Fisik tidak
+//    - Geser transaksi antara sistem dan fisik (bisa geser beberapa hari)
+// 4. Jangan langsung eksekusi Berdasar Nomor (hanya jika Qty sama persis atau di ujung dari hasil analisa)
 export function buildVarianceDateMutationComparisons(
   periodItem: PeriodItemAnalysis,
   systemMutations: SystemMutationRecord[],
   stockCards: AnalyzedStockCard[],
-  specificDayFilter: number | 'ALL' = 'ALL'
+  specificDayFilter: number | 'ALL' = 'ALL',
+  displayMode: 'ALL_DATES' | 'VARIANCE_ONLY' = 'VARIANCE_ONLY'
 ): VarianceDateMutationComparison[] {
   const { item, periodDaily } = periodItem;
+  const allDaily = item.daily;
 
-  // Match stock card for this item if available
   const matchedCard = stockCards.find(
     (sc) =>
       sc.itemName.toLowerCase().trim() === item.name.toLowerCase().trim() ||
@@ -738,249 +1005,576 @@ export function buildVarianceDateMutationComparisons(
       item.name.toLowerCase().includes(sc.itemName.toLowerCase())
   );
 
-  // Filter dates in the selected period:
-  // If specificDayFilter is a specific day (e.g. 5), include that day so the user sees its analysis;
-  // otherwise include all variance dates (selisih > 0 or accuracy < 100%, excluding holiday day 4)
+  // All mutations for this item across all dates (for multi-day shift detection)
+  const itemMutationsAllDays = systemMutations.filter((m) => {
+    const mItem = m.itemName.toLowerCase().trim();
+    const tItem = item.name.toLowerCase().trim();
+    const mDesc = m.description.toLowerCase();
+    return (
+      mItem === 'semua item' ||
+      mItem === tItem ||
+      mItem.includes(tItem) ||
+      tItem.includes(mItem) ||
+      mDesc.includes(tItem)
+    );
+  });
+
   const targetDays = periodDaily.filter((d) => {
-    if (d.day === 4) return false;
     if (specificDayFilter !== 'ALL') {
       return d.day === specificDayFilter;
     }
-    return d.selisih > 0 || (d.dailyAccuracyPercent ?? 100) < 100;
+    if (displayMode === 'ALL_DATES') {
+      return true;
+    }
+    return d.selisih > 0 || (d.dailyAccuracyPercent !== null && d.dailyAccuracyPercent < 100);
   });
 
-  return targetDays
-    .map((d) => {
-      // 1. Determine Tipe Selisih (varianceDirection & varianceTypeLabel)
-      const soVal = d.so ?? 0;
-      const accVal = d.accurate ?? 0;
-      let varianceDirection: VarianceDateMutationComparison['varianceDirection'] = 'FISIK_KURANG';
-      let varianceTypeLabel = 'Selisih Kurang Fisik (SO < Sistem)';
+  return targetDays.map((d) => {
+    const soVal = d.so ?? 0;
+    const accVal = d.accurate ?? 0;
+    const hasActivity =
+      (d.so !== null && d.so > 0) ||
+      (d.accurate !== null && d.accurate !== 0) ||
+      d.selisih > 0;
 
-      if (d.selisih === 0 && (d.dailyAccuracyPercent ?? 100) === 100) {
-        varianceDirection = 'SEIMBANG';
-        varianceTypeLabel = 'Tidak Ada Selisih (Klop 100%)';
-      } else if (d.day === 7 && (d.so === 0 || d.so === null) && accVal > 0) {
-        varianceDirection = 'SO_BELUM_INPUT';
-        varianceTypeLabel = 'Cut-Off SO Belum Input (SO = 0 vs Sistem Aktif)';
-      } else if (d.accurate !== null && d.accurate < 0) {
-        varianceDirection = 'SISTEM_MINUS';
-        varianceTypeLabel = 'Stok Sistem Minus (Negative Inventory)';
-      } else if ((d.so === 0 || d.so === null) && accVal > 0) {
-        varianceDirection = 'FISIK_KURANG';
-        varianceTypeLabel = 'Selisih Formula / SO Kosong (SO = 0, Sistem Ada Saldo)';
-      } else if (soVal > 0 && d.accurate === null) {
-        varianceDirection = 'FISIK_LEBIH';
-        varianceTypeLabel = 'Data Sistem Kosong (Fisik Ada, Sistem Tidak Tertarik)';
-      } else if (soVal > accVal) {
-        varianceDirection = 'FISIK_LEBIH';
-        varianceTypeLabel = 'Selisih Lebih Fisik (SO Fisik > Stok Sistem)';
-      } else if (soVal < accVal) {
-        varianceDirection = 'FISIK_KURANG';
-        varianceTypeLabel = 'Selisih Kurang Fisik (SO Fisik < Stok Sistem)';
+    // Cari tanggal aktif sebelumnya (contoh: tgl 1 sebelum tgl 2, atau tgl 3 sebelum tgl 5 jika tgl 4 libur SO)
+    let prevRecord: DailyRecord | null = null;
+    for (let idx = allDaily.findIndex((x) => x.day === d.day) - 1; idx >= 0; idx--) {
+      const cand = allDaily[idx];
+      if ((cand.so !== null && cand.so > 0) || (cand.accurate !== null && cand.accurate !== 0)) {
+        prevRecord = cand;
+        break;
       }
+    }
 
-      // 2. Hanya ambil Data Mutasi yang benar-benar diupload untuk item & tanggal tersebut (Tanpa data dummy otomatis)
-      const matchedSystemMutations = systemMutations.filter((m) => {
-        if (m.dayNumber !== d.day) return false;
-        const mItem = m.itemName.toLowerCase().trim();
-        const tItem = item.name.toLowerCase().trim();
-        const mDesc = m.description.toLowerCase();
-        return (
-          mItem === 'semua item' ||
-          mItem === tItem ||
-          mItem.includes(tItem) ||
-          tItem.includes(mItem) ||
-          mDesc.includes(tItem)
-        );
-      });
+    // Cari tanggal aktif berikutnya (untuk deteksi geser transaksi beberapa hari ke depan)
+    const nextRecords: DailyRecord[] = [];
+    const currIdx = allDaily.findIndex((x) => x.day === d.day);
+    for (let idx = currIdx + 1; idx < allDaily.length && nextRecords.length < 3; idx++) {
+      const cand = allDaily[idx];
+      if ((cand.so !== null && cand.so > 0) || (cand.accurate !== null && cand.accurate !== 0)) {
+        nextRecords.push(cand);
+      }
+    }
 
-      // 3. Hanya ambil Kartu Stock yang benar-benar diupload untuk item & tanggal tersebut
-      const matchedStockCardEntries: StockCardEntry[] = matchedCard
-        ? matchedCard.entries.filter((e) => e.dayNumber === d.day)
-        : [];
-      const lastCardEntry =
-        matchedStockCardEntries.length > 0
-          ? matchedStockCardEntries[matchedStockCardEntries.length - 1]
-          : null;
-      const stockCardBalance = lastCardEntry ? lastCardEntry.balance : null;
-      const gapSOvsStockCard =
-        stockCardBalance !== null && d.so !== null ? d.so - stockCardBalance : null;
-      const gapAccuratevsStockCard =
-        stockCardBalance !== null && d.accurate !== null
-          ? d.accurate - stockCardBalance
-          : null;
+    const prevSO = prevRecord?.so ?? null;
+    const prevAcc = prevRecord?.accurate ?? null;
+    const prevLabel = prevRecord?.dateLabel ?? null;
 
-      // 4. Analisa Banding Berdasarkan Data Mutasi (jika ada upload di tgl tersebut) & Kartu Stock (jika ada)
-      const hasUploadedMutasi = matchedSystemMutations.length > 0;
-      const hasUploadedCard = matchedStockCardEntries.length > 0;
+    let varianceDirection: VarianceDateMutationComparison['varianceDirection'] = 'SEIMBANG';
+    let varianceTypeLabel = 'Tidak Ada Selisih (Klop 100%)';
 
-      const totalMutIn = matchedSystemMutations.reduce((s, m) => s + m.qtyIn, 0);
-      const totalMutOut = matchedSystemMutations.reduce((s, m) => s + m.qtyOut, 0);
-      const mutSummaryParts = matchedSystemMutations.map(
-        (m) =>
-          `Nomor: ${m.transactionNo} (${m.description}) [Masuk: +${m.qtyIn.toLocaleString(
-            'id-ID'
-          )}, Keluar: -${m.qtyOut.toLocaleString('id-ID')}]`
-      );
+    if (!hasActivity) {
+      varianceDirection = 'SEIMBANG';
+      varianceTypeLabel = 'Belum Ada Transaksi / Kosong di Spreadsheet';
+    } else if (d.selisih === 0 && (d.dailyAccuracyPercent ?? 100) === 100) {
+      varianceDirection = 'SEIMBANG';
+      varianceTypeLabel = 'Tidak Ada Selisih (Klop 100%)';
+    } else if ((d.so === 0 || d.so === null) && accVal > 0) {
+      varianceDirection = d.day === 7 ? 'SO_BELUM_INPUT' : 'FISIK_KURANG';
+      varianceTypeLabel =
+        d.day === 7
+          ? 'SO Fisik Belum Input (SO = 0 vs Accurate Aktif)'
+          : 'SO Fisik = 0 / Belum Terbanding dengan Accurate';
+    } else if (d.accurate !== null && d.accurate < 0) {
+      varianceDirection = 'SISTEM_MINUS';
+      varianceTypeLabel = 'Stok Accurate Minus (Negative Inventory)';
+    } else if (soVal > 0 && d.accurate === null) {
+      varianceDirection = 'FISIK_LEBIH';
+      varianceTypeLabel = 'Data Accurate Kosong (Fisik Ada, Sistem Kosong)';
+    } else if (soVal > accVal) {
+      varianceDirection = 'FISIK_LEBIH';
+      varianceTypeLabel = 'Selisih Lebih Fisik (SO Fisik > Accurate)';
+    } else if (soVal < accVal) {
+      varianceDirection = 'FISIK_KURANG';
+      varianceTypeLabel = 'Selisih Kurang Fisik (SO Fisik < Accurate)';
+    }
 
-      let mutationComparisonResult = '';
-      let potentialDiscrepancyFinding = '';
-      let checkRecommendation = '';
+    const matchedSystemMutations = itemMutationsAllDays.filter((m) => m.dayNumber === d.day);
+    const matchedStockCardEntries: StockCardEntry[] = matchedCard
+      ? matchedCard.entries.filter((e) => e.dayNumber === d.day)
+      : [];
+    const lastCardEntry =
+      matchedStockCardEntries.length > 0
+        ? matchedStockCardEntries[matchedStockCardEntries.length - 1]
+        : null;
+    const stockCardBalance = lastCardEntry ? lastCardEntry.balance : null;
+    const gapSOvsStockCard =
+      stockCardBalance !== null && d.so !== null ? d.so - stockCardBalance : null;
+    const gapAccuratevsStockCard =
+      stockCardBalance !== null && d.accurate !== null
+        ? d.accurate - stockCardBalance
+        : null;
 
-      if (hasUploadedMutasi || hasUploadedCard) {
-        mutationComparisonResult = `Hasil Banding ${d.dateLabel}: SO Fisik = ${soVal.toLocaleString(
-          'id-ID'
-        )} ${item.uom} vs Sistem = ${accVal.toLocaleString(
-          'id-ID'
-        )} ${item.uom} (Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom}). ${
-          hasUploadedMutasi
-            ? `Data Mutasi terupload pada ${d.dateLabel}: [${mutSummaryParts.join(' ; ')}] (Total Masuk: +${totalMutIn.toLocaleString(
-                'id-ID'
-              )}, Total Keluar: -${totalMutOut.toLocaleString('id-ID')} ${item.uom}).`
-            : 'Belum ada upload mutasi sistem di tanggal ini.'
-        } ${
-          hasUploadedCard
-            ? `Kartu Stock terupload: Bukti ${lastCardEntry?.docNo} (Masuk +${
-                lastCardEntry?.qtyIn ?? 0
-              }, Keluar -${lastCardEntry?.qtyOut ?? 0}, Saldo Akhir: ${stockCardBalance?.toLocaleString(
-                'id-ID'
-              )} ${item.uom}).`
-            : ''
-        }`;
+    const hasUploadedMutasi = matchedSystemMutations.length > 0;
+    const hasUploadedCard = matchedStockCardEntries.length > 0;
 
-        // Cari transaksi spesifik yang jumlahnya mendekati selisih atau menjelaskan lonjakan
-        const matchingTxByQty = matchedSystemMutations.find(
-          (m) =>
-            Math.abs(m.qtyIn - d.selisih) <= 5 ||
-            Math.abs(m.qtyOut - d.selisih) <= 5 ||
-            (d.deltaSO !== null && Math.abs(m.qtyOut - Math.abs(d.deltaSO)) <= 5)
-        );
+    const totalMutIn = matchedSystemMutations.reduce((s, m) => s + m.qtyIn, 0);
+    const totalMutOut = matchedSystemMutations.reduce((s, m) => s + m.qtyOut, 0);
+    const netMutasiUpload = totalMutIn - totalMutOut;
 
-        if (matchingTxByQty) {
-          potentialDiscrepancyFinding = `Potensi Selisih Ditemukan pada Transaksi Nomor [${
-            matchingTxByQty.transactionNo
-          }] (${matchingTxByQty.transactionType} - "${
-            matchingTxByQty.description
-          }"): Jumlah transaksi (Masuk: +${matchingTxByQty.qtyIn.toLocaleString(
-            'id-ID'
-          )}, Keluar: -${matchingTxByQty.qtyOut.toLocaleString(
-            'id-ID'
-          )} ${item.uom}) berkaitan langsung dengan ${varianceTypeLabel} sebesar ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom} pada tanggal ${d.dateLabel}.`;
-        } else if (hasUploadedMutasi) {
-          potentialDiscrepancyFinding = `Berdasarkan ${
-            matchedSystemMutations.length
-          } transaksi mutasi pada ${d.dateLabel} (Total Masuk +${totalMutIn.toLocaleString(
-            'id-ID'
-          )}, Keluar -${totalMutOut.toLocaleString('id-ID')} ${
-            item.uom
-          }) dibanding perubahan fisik SO (${
-            d.deltaSO !== null
-              ? `${d.deltaSO >= 0 ? '+' : ''}${d.deltaSO.toLocaleString('id-ID')}`
-              : '0'
-          } ${item.uom}), potensi selisih ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom} berasal dari selisih waktu cut-off posting pada nomor [${matchedSystemMutations
-            .map((m) => m.transactionNo)
-            .join(', ')}].`;
-        } else {
-          potentialDiscrepancyFinding = `Berdasarkan Kartu Stock tanggal ${
-            d.dateLabel
-          } (Bukti ${lastCardEntry?.docNo}, Saldo ${stockCardBalance?.toLocaleString(
-            'id-ID'
-          )} ${item.uom}), terdapat deviasi terhadap angka Sistem (${accVal.toLocaleString(
-            'id-ID'
-          )}) maupun SO (${soVal.toLocaleString('id-ID')}).`;
-        }
+    const totalCardIn = matchedStockCardEntries.reduce((s, e) => s + e.qtyIn, 0);
+    const totalCardOut = matchedStockCardEntries.reduce((s, e) => s + e.qtyOut, 0);
 
-        checkRecommendation = `Penyelesaian: Verifikasi fisik & dokumen Nomor [${
-          hasUploadedMutasi
-            ? matchedSystemMutations.map((m) => m.transactionNo).join(', ')
-            : lastCardEntry?.docNo || '-'
-        }] pada tanggal ${d.dateLabel}. Sesuaikan selisih ${d.selisih.toLocaleString(
-          'id-ID'
-        )} ${item.uom} (${varianceTypeLabel}) agar saldo sistem dan fisik kembali klop 100%.`;
+    // =========================================================================
+    // 1. HITUNGAN ACUAN SO SEBELUMNYA
+    //    Contoh Logika: Jika Tgl Sebelumnya ada 20, Tgl Ini Out 5 (In 0),
+    //    maka Hasil SO Tgl Ini Harusnya = 15.
+    // =========================================================================
+    const netFisikDelta = prevSO !== null && d.so !== null ? soVal - prevSO : null;
+    const netAccDelta = prevAcc !== null && d.accurate !== null ? accVal - prevAcc : null;
+
+    const fisikOutImplied = netFisikDelta !== null && netFisikDelta < 0 ? Math.abs(netFisikDelta) : 0;
+    const fisikInImplied = netFisikDelta !== null && netFisikDelta > 0 ? netFisikDelta : 0;
+    const accOutImplied = netAccDelta !== null && netAccDelta < 0 ? Math.abs(netAccDelta) : 0;
+    const accInImplied = netAccDelta !== null && netAccDelta > 0 ? netAccDelta : 0;
+
+    // Gunakan In/Out dari Mutasi Sistem jika diupload, atau Kartu Stock jika ada, atau pergerakan Accurate
+    const inToday = hasUploadedMutasi
+      ? totalMutIn
+      : hasUploadedCard
+      ? totalCardIn
+      : accInImplied;
+    const outToday = hasUploadedMutasi
+      ? totalMutOut
+      : hasUploadedCard
+      ? totalCardOut
+      : accOutImplied;
+
+    const expectedSOFromPrev =
+      prevSO !== null && hasActivity ? prevSO + inToday - outToday : accVal;
+
+    const deviationFromExpected =
+      d.so !== null && expectedSOFromPrev !== null ? soVal - expectedSOFromPrev : soVal - accVal;
+
+    // Tentukan 2 Kriteria Besar: FISIK_KURANG vs FISIK_LEBIH (atau SESUAI bila tidak ada selisih)
+    let majorCriteria: 'FISIK_KURANG' | 'FISIK_LEBIH' | 'SESUAI' = 'SESUAI';
+    if (hasActivity && (d.selisih > 0 || (deviationFromExpected !== null && deviationFromExpected !== 0))) {
+      if (soVal < accVal || (soVal === accVal && (deviationFromExpected ?? 0) < 0)) {
+        majorCriteria = 'FISIK_KURANG';
+      } else if (soVal > accVal || (soVal === accVal && (deviationFromExpected ?? 0) > 0)) {
+        majorCriteria = 'FISIK_LEBIH';
+      }
+    }
+
+    let previousSOReferenceSummary = '';
+    if (prevRecord && prevSO !== null && hasActivity) {
+      const inOutText =
+        inToday > 0 && outToday > 0
+          ? `In ${inToday.toLocaleString('id-ID')} & Out ${outToday.toLocaleString('id-ID')}`
+          : inToday > 0
+          ? `In ${inToday.toLocaleString('id-ID')} (Out 0)`
+          : `Out ${outToday.toLocaleString('id-ID')}`;
+
+      if (deviationFromExpected === 0 && d.selisih === 0) {
+        previousSOReferenceSummary = `Acuan SO ${prevLabel} ada ${prevSO.toLocaleString('id-ID')} ${item.uom}, pada ${d.dateLabel} tercatat ${inOutText} ${item.uom} → Hasil SO ${d.dateLabel} seharusnya ${expectedSOFromPrev.toLocaleString('id-ID')} ${item.uom}. Realisasi SO Aktual = ${soVal.toLocaleString('id-ID')} ${item.uom} (SESUAI 100%).`;
       } else {
-        // Ketika belum ada upload mutasi / kartu stock pada tanggal tersebut
-        mutationComparisonResult = `Rekap Mutasi Sistem & Kartu Stock pada tanggal ${d.dateLabel} masih kosong (belum ada file mutasi yang diupload untuk ${item.name} di tanggal ${d.dateLabel}). Analisa saat ini didasarkan pada perbandingan Spreadsheet SO (${soVal.toLocaleString(
-          'id-ID'
-        )} ${item.uom}) vs Accurate (${accVal.toLocaleString('id-ID')} ${item.uom}).`;
+        const diffExpectedAbs = Math.abs(deviationFromExpected ?? 0);
+        previousSOReferenceSummary = `Acuan SO ${prevLabel} ada ${prevSO.toLocaleString('id-ID')} ${item.uom}, pada ${d.dateLabel} tercatat ${inOutText} ${item.uom} → Hasil SO ${d.dateLabel} seharusnya ${expectedSOFromPrev.toLocaleString('id-ID')} ${item.uom}. Realisasi SO Aktual = ${soVal.toLocaleString('id-ID')} ${item.uom} & Stok Accurate = ${accVal.toLocaleString('id-ID')} ${item.uom} → Tidak sesuai sebesar ${
+          diffExpectedAbs > 0 ? diffExpectedAbs.toLocaleString('id-ID') : d.selisih.toLocaleString('id-ID')
+        } ${item.uom} (Selisih vs Accurate: ${d.selisih.toLocaleString('id-ID')} ${item.uom} — Masuk Kriteria: ${
+          majorCriteria === 'FISIK_KURANG' ? 'FISIK KURANG' : 'FISIK LEBIH'
+        }).`;
+      }
+    } else if (d.day === 1 && hasActivity) {
+      previousSOReferenceSummary = `Titik Awal SO (${d.dateLabel}): Stok Fisik SO = ${soVal.toLocaleString('id-ID')} ${item.uom} vs Stok Accurate = ${accVal.toLocaleString('id-ID')} ${item.uom}${
+        d.selisih > 0
+          ? ` → Terdapat selisih awal ${d.selisih.toLocaleString('id-ID')} ${item.uom} (${
+              majorCriteria === 'FISIK_KURANG' ? 'Kriteria: FISIK KURANG' : 'Kriteria: FISIK LEBIH'
+            }).`
+          : ' (Sesuai 100%).'
+      }`;
+    } else {
+      previousSOReferenceSummary = `Tanggal ${d.dateLabel}: SO Fisik = ${soVal.toLocaleString('id-ID')} ${item.uom} | Stok Accurate = ${accVal.toLocaleString('id-ID')} ${item.uom}.`;
+    }
 
-        if (varianceDirection === 'SO_BELUM_INPUT') {
-          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Jumlah: ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom}): Angka SO Fisik pada tanggal ${
-            d.dateLabel
-          } masih 0 sementara saldo sistem tercatat ${accVal.toLocaleString(
-            'id-ID'
-          )} ${item.uom}.`;
-          checkRecommendation = `Penyelesaian: Input hasil hitung fisik SO tanggal ${d.dateLabel} atau upload file Mutasi / Kartu Stock tanggal ${d.dateLabel} untuk memvalidasi pergerakan barang.`;
-        } else if (varianceDirection === 'SISTEM_MINUS') {
-          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Jumlah: ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom}): Saldo sistem bernilai negatif (${accVal.toLocaleString(
-            'id-ID'
-          )} ${item.uom}) akibat pengeluaran diposting sebelum penerimaan.`;
-          checkRecommendation = `Penyelesaian: Upload data mutasi tanggal ${d.dateLabel} untuk mengecek nomor transaksi keluar, lalu perbaiki tanggal penerimaan barang (RI).`;
-        } else {
-          potentialDiscrepancyFinding = `Potensi Selisih (${d.dateLabel} · Tipe: ${varianceTypeLabel} · Jumlah: ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom}): Terjadi perubahan fisik SO (${
-            d.deltaSO !== null
-              ? `${d.deltaSO >= 0 ? '+' : ''}${d.deltaSO.toLocaleString('id-ID')}`
-              : '0'
-          } ${item.uom}) yang tidak sebanding dengan perubahan saldo sistem (${
-            d.deltaAccurate !== null
-              ? `${d.deltaAccurate >= 0 ? '+' : ''}${d.deltaAccurate.toLocaleString('id-ID')}`
-              : '0'
-          } ${item.uom}). Upload file Mutasi pada tanggal ${
-            d.dateLabel
-          } untuk melihat Nomor & Deksripsi bukti penyebabnya.`;
-          checkRecommendation = `Penyelesaian: Upload file Master Mutasi Barang (${item.name}) untuk tanggal ${d.dateLabel} pada kolom di atas guna melacak Nomor transaksi Masuk/Keluar yang memicu selisih ${d.selisih.toLocaleString(
-            'id-ID'
-          )} ${item.uom}.`;
+    // =========================================================================
+    // 2. BREAKDOWN 2 KRITERIA BESAR:
+    //    - KRITERIA 1: FISIK KURANG (Stok Fisik < Seharusnya / Accurate)
+    //    - KRITERIA 2: FISIK LEBIH  (Stok Fisik > Seharusnya / Accurate)
+    // =========================================================================
+    const gapVsExpectedAbs = Math.abs(deviationFromExpected ?? 0);
+    const effectiveShortfallQty =
+      majorCriteria === 'FISIK_KURANG'
+        ? Math.max(d.selisih, gapVsExpectedAbs)
+        : 0;
+    const effectiveSurplusQty =
+      majorCriteria === 'FISIK_LEBIH'
+        ? Math.max(d.selisih, gapVsExpectedAbs)
+        : 0;
+
+    const fisikKurangBreakdown: CriteriaBreakdownDetail = {
+      criteriaType: 'FISIK_KURANG',
+      criteriaTitle: 'KRITERIA 1: FISIK KURANG (Realisasi SO Fisik < Hasil Seharusnya / Sistem)',
+      discrepancyQty: effectiveShortfallQty,
+      breakdownCalculations:
+        majorCriteria === 'FISIK_KURANG'
+          ? [
+              prevLabel && prevSO !== null
+                ? `Hitungan Acuan SO Sebelumnya: SO ${prevLabel} (${prevSO.toLocaleString('id-ID')} ${item.uom}) + Masuk (${inToday.toLocaleString('id-ID')}) - Out (${outToday.toLocaleString('id-ID')}) = Seharusnya ${expectedSOFromPrev.toLocaleString('id-ID')} ${item.uom}, namun SO Fisik ${d.dateLabel} hanya ${soVal.toLocaleString('id-ID')} ${item.uom} (Kurang ${gapVsExpectedAbs.toLocaleString('id-ID')} ${item.uom} dari acuan SO sebelumnya).`
+                : `Posisi Saldo Awal ${d.dateLabel}: Stok Accurate mencatat ${accVal.toLocaleString('id-ID')} ${item.uom}, namun SO Fisik aktual hanya ${soVal.toLocaleString('id-ID')} ${item.uom}.`,
+              `Perbandingan Fisik vs Sistem (${d.dateLabel}): SO Fisik (${soVal.toLocaleString('id-ID')} ${item.uom}) lebih rendah -${d.selisih.toLocaleString('id-ID')} ${item.uom} dibanding Stok Accurate (${accVal.toLocaleString('id-ID')} ${item.uom}).`,
+              fisikOutImplied > outToday
+                ? `Kelebihan Pengeluaran Fisik: Barang keluar secara fisik sebesar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom}, melampaui Data Out sistem (${outToday.toLocaleString('id-ID')} ${item.uom}) sebesar ${(fisikOutImplied - outToday).toLocaleString('id-ID')} ${item.uom}.`
+                : `Selisih Kurang Akumulatif: Pengeluaran fisik hari ini (${fisikOutImplied.toLocaleString('id-ID')} ${item.uom}) berbanding Data Out sistem (${outToday.toLocaleString('id-ID')} ${item.uom}), menyisakan defisit fisik ${d.selisih.toLocaleString('id-ID')} ${item.uom}.`,
+            ]
+          : [
+              `Tidak ditemukan defisit Fisik Kurang pada ${d.dateLabel} (SO Fisik ${soVal.toLocaleString('id-ID')} ${item.uom} tidak berada di bawah patokan ${accVal.toLocaleString('id-ID')} ${item.uom}).`,
+            ],
+      possibleSources: [
+        `Pengeluaran Fisik Tanpa Dokumen Accurate: Barang sudah diambil/dikirim keluar gudang pada ${d.dateLabel} (sebesar ~${(effectiveShortfallQty || d.selisih).toLocaleString('id-ID')} ${item.uom}), tetapi Surat Jalan / Delivery Order (DO) atau Pemakaian Barang belum diinput ke Accurate.`,
+        `Over-Sending / Lebih Kirim Fisik ke Outlet: Jumlah fisik barang yang dimuat ke armada melebihi angka Qty yang tertera pada dokumen DO/Surat Jalan.`,
+        `Barang Rusak / Reject / Waste / Susut Belum Di-adjust: Terdapat barang rusak, pecah, atau kedaluwarsa di gudang yang sudah dipisahkan dari stok bagus namun belum dibuatkan Inventory Adjustment Out di Accurate.`,
+        `Penerimaan Barang (RI) Diposting Duluan di Sistem: Admin sudah menginput Penerimaan Barang (+${inToday.toLocaleString('id-ID')} ${item.uom}) di Accurate, tetapi barang fisik belum tiba atau belum masuk ke area hitung SO.`,
+        `Lokasi Penyimpanan Terlewat Saat Hitung SO: Sebagian stok fisik masih tersimpan di chiller/freezer cadangan, area transit loading dock, atau tumpukan palet belakang sehingga belum terhitung.`,
+      ],
+    };
+
+    const fisikLebihBreakdown: CriteriaBreakdownDetail = {
+      criteriaType: 'FISIK_LEBIH',
+      criteriaTitle: 'KRITERIA 2: FISIK LEBIH (Realisasi SO Fisik > Hasil Seharusnya / Sistem)',
+      discrepancyQty: effectiveSurplusQty,
+      breakdownCalculations:
+        majorCriteria === 'FISIK_LEBIH'
+          ? [
+              prevLabel && prevSO !== null
+                ? `Hitungan Acuan SO Sebelumnya: SO ${prevLabel} (${prevSO.toLocaleString('id-ID')} ${item.uom}) + Masuk (${inToday.toLocaleString('id-ID')}) - Out (${outToday.toLocaleString('id-ID')}) = Seharusnya ${expectedSOFromPrev.toLocaleString('id-ID')} ${item.uom}, namun SO Fisik ${d.dateLabel} tercatat ${soVal.toLocaleString('id-ID')} ${item.uom} (Lebih +${gapVsExpectedAbs.toLocaleString('id-ID')} ${item.uom} terhadap acuan).`
+                : `Posisi Saldo Awal ${d.dateLabel}: SO Fisik aktual mencatat ${soVal.toLocaleString('id-ID')} ${item.uom}, lebih tinggi dari Stok Accurate (${accVal.toLocaleString('id-ID')} ${item.uom}).`,
+              `Perbandingan Fisik vs Sistem (${d.dateLabel}): SO Fisik (${soVal.toLocaleString('id-ID')} ${item.uom}) lebih banyak +${d.selisih.toLocaleString('id-ID')} ${item.uom} dibanding Stok Accurate (${accVal.toLocaleString('id-ID')} ${item.uom}).`,
+              outToday > fisikOutImplied
+                ? `Pemotongan Sistem Mendahului Fisik: Sistem Accurate sudah memotong Out sebesar ${outToday.toLocaleString('id-ID')} ${item.uom}, sedangkan barang fisik baru keluar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom} (tertahan +${(outToday - fisikOutImplied).toLocaleString('id-ID')} ${item.uom} di gudang).`
+                : fisikInImplied > inToday
+                ? `Penambahan Fisik Belum Masuk Sistem: Stok fisik bertambah +${fisikInImplied.toLocaleString('id-ID')} ${item.uom}, sedangkan di sistem hanya tercatat In +${inToday.toLocaleString('id-ID')} ${item.uom}.`
+                : `Kelebihan Stok Fisik: Terdapat surplus fisik +${d.selisih.toLocaleString('id-ID')} ${item.uom} di gudang dibanding saldo sistem Accurate.`,
+            ]
+          : [
+              `Tidak ditemukan surplus Fisik Lebih pada ${d.dateLabel} (SO Fisik ${soVal.toLocaleString('id-ID')} ${item.uom} tidak melebihi patokan ${accVal.toLocaleString('id-ID')} ${item.uom}).`,
+            ],
+      possibleSources: [
+        `Accurate Sudah Potong Out Tapi Barang Fisik Belum Keluar: Dokumen DO / Surat Jalan (-${outToday.toLocaleString('id-ID')} ${item.uom}) sudah diterbitkan di Accurate pada ${d.dateLabel}, namun barang fisik masih tertahan di area staging/muat saat SO dilakukan dan baru dikirim hari berikutnya.`,
+        `Barang Masuk / Retur Cabang Belum Diinput ke Accurate: Barang fisik dari supplier atau retur outlet sudah diterima di gudang dan ikut dihitung saat SO, tetapi dokumen Receive Item (RI) belum diposting di Accurate.`,
+        `Under-Sending / Kurang Kirim Fisik ke Cabang: Dokumen DO memotong stok sistem penuh, tetapi fisik yang dikirim ke cabang kurang dari Qty dokumen (sisa barang tertinggal di rak).`,
+        `Double Input Pengeluaran di Accurate: Satu pengeluaran fisik yang sama tercatat dua kali (duplikat nomor DO/pemakaian) di sistem Accurate sehingga saldo sistem terpotong berlebih.`,
+        `Double Count / Beda Konversi Satuan (${item.uom}) Saat SO: Tumpukan barang yang sama terhitung dua kali atau terjadi salah konversi pack/inner ke ${item.uom}.`,
+      ],
+    };
+
+    const criteriaBreakdown: CriteriaBreakdownDetail =
+      majorCriteria === 'FISIK_KURANG'
+        ? fisikKurangBreakdown
+        : majorCriteria === 'FISIK_LEBIH'
+        ? fisikLebihBreakdown
+        : {
+            criteriaType: 'SESUAI',
+            criteriaTitle: 'SESUAI ACUAN (Stok Fisik & Sistem Seimbang)',
+            discrepancyQty: 0,
+            breakdownCalculations: [
+              `Perhitungan SO pada ${d.dateLabel} sesuai dengan acuan (${soVal.toLocaleString('id-ID')} ${item.uom}).`,
+            ],
+            possibleSources: ['Tidak ditemukan indikasi sumber selisih pada tanggal ini.'],
+          };
+
+    // =========================================================================
+    // 3. KECOCOKAN TANGGAL & KECOCOKAN TOTAL QTY IN - OUT
+    // =========================================================================
+    let dateAndQtyMatchSummary = '';
+    const movementGap =
+      netFisikDelta !== null && netAccDelta !== null ? netFisikDelta - netAccDelta : null;
+
+    if (hasUploadedMutasi) {
+      const diffInOutVsFisik = netFisikDelta !== null ? netFisikDelta - netMutasiUpload : null;
+      dateAndQtyMatchSummary = `Kecocokan Tanggal ${d.dateLabel}: Ditemukan ${matchedSystemMutations.length} baris mutasi. Total Qty IN = +${totalMutIn.toLocaleString('id-ID')} ${item.uom}, Total Qty OUT = -${totalMutOut.toLocaleString('id-ID')} ${item.uom} (Net IN-OUT Sistem: ${netMutasiUpload >= 0 ? '+' : ''}${netMutasiUpload.toLocaleString('id-ID')} ${item.uom}) vs Perubahan Fisik SO: ${netFisikDelta !== null ? `${netFisikDelta >= 0 ? '+' : ''}${netFisikDelta.toLocaleString('id-ID')}` : '0'} ${item.uom}.${diffInOutVsFisik !== null ? (diffInOutVsFisik === 0 ? ' Total Qty IN-OUT COCOK 100% dengan pergerakan fisik hari ini.' : ` Terdapat selisih Total Qty IN-OUT sebesar ${Math.abs(diffInOutVsFisik).toLocaleString('id-ID')} ${item.uom} pada tanggal ini.`) : ''}`;
+    } else if (netFisikDelta !== null && netAccDelta !== null && movementGap !== null) {
+      dateAndQtyMatchSummary = `Kecocokan Tanggal ${prevLabel} → ${d.dateLabel}: Net IN-OUT Fisik = ${netFisikDelta >= 0 ? '+' : ''}${netFisikDelta.toLocaleString('id-ID')} ${item.uom} (Out Fisik: ${fisikOutImplied.toLocaleString('id-ID')}, In Fisik: ${fisikInImplied.toLocaleString('id-ID')}) vs Net IN-OUT Accurate = ${netAccDelta >= 0 ? '+' : ''}${netAccDelta.toLocaleString('id-ID')} ${item.uom} (Out Acc: ${accOutImplied.toLocaleString('id-ID')}, In Acc: ${accInImplied.toLocaleString('id-ID')}). ${
+        movementGap === 0
+          ? `Total Qty IN-OUT pada tanggal ${d.dateLabel} SUDAH COCOK (0 selisih baru di hari ini; selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom} merupakan bawaan dari tanggal sebelumnya).`
+          : `Terdapat ketidakcocokan Total Qty IN-OUT pada tanggal ${d.dateLabel} sebesar ${Math.abs(movementGap).toLocaleString('id-ID')} ${item.uom}.`
+      }`;
+    } else {
+      dateAndQtyMatchSummary = `Tanggal ${d.dateLabel}: SO Fisik ${soVal.toLocaleString('id-ID')} ${item.uom} vs Accurate ${accVal.toLocaleString('id-ID')} ${item.uom} (Selisih: ${d.selisih.toLocaleString('id-ID')} ${item.uom}).`;
+    }
+
+    // =========================================================================
+    // 4. PERLUASAN LOGIKA & DEEPSEARCH LINTAS HISTORIS (H-3 s/d H+3 & Pola Item)
+    // =========================================================================
+    const extendedLogicFindings: string[] = [];
+    const deepSearchFindings: string[] = [];
+
+    // Hitung statistik lintas seluruh tanggal aktif untuk Deepsearch
+    const allActiveDaysForItem = allDaily.filter(
+      (r) => (r.so !== null && r.so > 0) || (r.accurate !== null && r.accurate !== 0)
+    );
+    const totalKurangDays = allActiveDaysForItem.filter(
+      (r) => (r.so ?? 0) < (r.accurate ?? 0)
+    ).length;
+    const totalLebihDays = allActiveDaysForItem.filter(
+      (r) => (r.so ?? 0) > (r.accurate ?? 0)
+    ).length;
+    const firstVarianceDay = allActiveDaysForItem.find((r) => r.selisih > 0);
+
+    if (hasActivity && (d.selisih > 0 || (deviationFromExpected !== null && deviationFromExpected !== 0))) {
+      // Deepsearch 1: Lacak Asal-Usul Selisih (Apakah muncul baru di tanggal ini atau carry-over dari tanggal sebelumnya)
+      if (prevRecord && prevRecord.selisih === d.selisih && movementGap === 0) {
+        deepSearchFindings.push(
+          `[Deepsearch Asal Selisih — Carry-Over Murni]: Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel} BUKAN berasal dari transaksi tanggal ${d.dateLabel} (karena Out Fisik ${fisikOutImplied.toLocaleString('id-ID')} = Out Sistem ${accOutImplied.toLocaleString('id-ID')} pada hari ini), melainkan terbawa dari ketidakcocokan yang sudah terjadi sejak ${firstVarianceDay?.dateLabel || prevRecord.dateLabel}.`
+        );
+      } else if (prevRecord && d.selisih !== prevRecord.selisih) {
+        const deltaSel = d.selisih - prevRecord.selisih;
+        deepSearchFindings.push(
+          `[Deepsearch Perubahan Harian]: Dibandingkan ${prevRecord.dateLabel} (selisih ${prevRecord.selisih.toLocaleString('id-ID')} ${item.uom}), pada ${d.dateLabel} terjadi ${
+            deltaSel > 0
+              ? `penambahan selisih baru sebesar +${deltaSel.toLocaleString('id-ID')} ${item.uom}`
+              : `penurunan/koreksi selisih sebesar ${deltaSel.toLocaleString('id-ID')} ${item.uom}`
+          } menjadi ${d.selisih.toLocaleString('id-ID')} ${item.uom}.`
+        );
+      } else if (d.day === 1 && d.selisih > 0) {
+        deepSearchFindings.push(
+          `[Deepsearch Saldo Awal]: Ketidakcocokan sebesar ${d.selisih.toLocaleString('id-ID')} ${item.uom} sudah muncul sejak hari pertama (${d.dateLabel}), mengindikasikan cut-off akhir bulan sebelumnya belum klop.`
+        );
+      }
+
+      // Kemungkinan A: Fisik Keluar Tanpa Data Accurate
+      if (fisikOutImplied > accOutImplied && fisikOutImplied > 0) {
+        const unrecordedOut = fisikOutImplied - accOutImplied + accInImplied;
+        const msg = `Fisik Keluar Tanpa Data Accurate: Pada ${d.dateLabel}, stok fisik keluar sebesar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom} (SO turun dari ${prevSO?.toLocaleString('id-ID')} ke ${soVal.toLocaleString('id-ID')}), sedangkan di Accurate ${
+          accOutImplied > 0
+            ? `hanya tercatat keluar ${accOutImplied.toLocaleString('id-ID')} ${item.uom}`
+            : accInImplied > 0
+            ? `justru bertambah +${accInImplied.toLocaleString('id-ID')} ${item.uom}`
+            : 'tidak ada pengurangan (Out = 0)'
+        }. Terdapat pengeluaran fisik ~${unrecordedOut.toLocaleString('id-ID')} ${item.uom} yang belum terpotong di Accurate.`;
+        extendedLogicFindings.push(msg);
+        deepSearchFindings.push(`[Deepsearch Mutasi Out]: ${msg}`);
+      }
+
+      // Kemungkinan B: Accurate Keluar Tapi Fisik Tidak Keluar
+      if (accOutImplied > fisikOutImplied && accOutImplied > 0) {
+        const unshippedPhysical = accOutImplied - fisikOutImplied + fisikInImplied;
+        const msg = `Accurate Keluar Tapi Fisik Tidak: Pada ${d.dateLabel}, sistem Accurate memotong Out sebesar ${accOutImplied.toLocaleString('id-ID')} ${item.uom} (Accurate turun dari ${prevAcc?.toLocaleString('id-ID')} ke ${accVal.toLocaleString('id-ID')}), tetapi fisik di gudang ${
+          fisikOutImplied === 0 && fisikInImplied === 0
+            ? `belum bergerak (SO tetap ${soVal.toLocaleString('id-ID')} ${item.uom})`
+            : fisikInImplied > 0
+            ? `justru bertambah +${fisikInImplied.toLocaleString('id-ID')} ${item.uom}`
+            : `hanya keluar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom}`
+        }. Terdapat ~${unshippedPhysical.toLocaleString('id-ID')} ${item.uom} yang sudah dipotong di Accurate namun fisiknya masih ada di gudang.`;
+        extendedLogicFindings.push(msg);
+        deepSearchFindings.push(`[Deepsearch Pemotongan Sistem]: ${msg}`);
+      } else if (accInImplied > fisikInImplied && accInImplied > 0) {
+        const unreceivedPhysical = accInImplied - fisikInImplied;
+        const msg = `Accurate Masuk Mendahului Fisik: Sistem Accurate mencatat penambahan In +${accInImplied.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel}, sementara fisik SO hanya bertambah +${fisikInImplied.toLocaleString('id-ID')} ${item.uom} (Gap ${unreceivedPhysical.toLocaleString('id-ID')} ${item.uom}).`;
+        extendedLogicFindings.push(msg);
+        deepSearchFindings.push(`[Deepsearch Penerimaan In]: ${msg}`);
+      }
+
+      // Deepsearch 2 & Kemungkinan C: Lacak Geser Transaksi Lintas Hari (H-3 s/d H+3) di Spreadsheet
+      const nearbyDays = allActiveDaysForItem.filter(
+        (r) => r.day !== d.day && Math.abs(r.day - d.day) <= 3
+      );
+      for (const near of nearbyDays) {
+        const nearFisikOut = near.deltaSO !== null && near.deltaSO < 0 ? Math.abs(near.deltaSO) : 0;
+        const nearAccOut =
+          near.deltaAccurate !== null && near.deltaAccurate < 0 ? Math.abs(near.deltaAccurate) : 0;
+
+        // Cek apakah Out Accurate hari ini cocok dengan Out Fisik di hari sekitar (atau sebaliknya)
+        if (
+          accOutImplied > 0 &&
+          nearFisikOut > 0 &&
+          Math.abs(accOutImplied - nearFisikOut) <= Math.max(5, accOutImplied * 0.1)
+        ) {
+          const shiftMsg = `[Deepsearch Geser Hari Sistem → Fisik]: Pengurangan Accurate sebesar -${accOutImplied.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel} ditemukan cocok dengan pengeluaran fisik SO sebesar -${nearFisikOut.toLocaleString('id-ID')} ${item.uom} pada tanggal ${near.dateLabel} (Geser ${Math.abs(near.day - d.day)} hari).`;
+          extendedLogicFindings.push(shiftMsg);
+          deepSearchFindings.push(shiftMsg);
+          break;
+        }
+        if (
+          fisikOutImplied > 0 &&
+          nearAccOut > 0 &&
+          Math.abs(fisikOutImplied - nearAccOut) <= Math.max(5, fisikOutImplied * 0.1)
+        ) {
+          const shiftMsg = `[Deepsearch Geser Hari Fisik → Sistem]: Pengeluaran fisik SO sebesar -${fisikOutImplied.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel} ditemukan cocok dengan pemotongan Accurate sebesar -${nearAccOut.toLocaleString('id-ID')} ${item.uom} pada tanggal ${near.dateLabel} (Geser ${Math.abs(near.day - d.day)} hari).`;
+          extendedLogicFindings.push(shiftMsg);
+          deepSearchFindings.push(shiftMsg);
+          break;
         }
       }
 
-      const acc = d.dailyAccuracyPercent ?? 0;
-      const severity: VarianceDateMutationComparison['severity'] =
-        d.isLowestAccuracyDay || acc < 75 || d.selisih >= 1000
-          ? 'CRITICAL'
-          : acc < 92 || d.selisih >= 200
-          ? 'HIGH'
-          : 'MEDIUM';
+      // Cek pemulihan otomatis di hari-hari berikutnya (nextRecords)
+      for (const nextRec of nextRecords) {
+        if (nextRec.so === null || nextRec.so === 0 || nextRec.accurate === null) continue;
+        if (nextRec.selisih === 0) {
+          deepSearchFindings.push(
+            `[Deepsearch Pemulihan Otomatis]: Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel} terbukti PULIH 100% (selisih menjadi 0) pada ${nextRec.dateLabel}, menandakan selisih pada ${d.dateLabel} murni akibat beda jam cut-off input dokumen.`
+          );
+          break;
+        } else if (nextRec.selisih < d.selisih) {
+          deepSearchFindings.push(
+            `[Deepsearch Koreksi Bertahap]: Selisih ${d.selisih.toLocaleString('id-ID')} ${item.uom} pada ${d.dateLabel} menyusut menjadi ${nextRec.selisih.toLocaleString('id-ID')} ${item.uom} pada ${nextRec.dateLabel} (terkoreksi ${(d.selisih - nextRec.selisih).toLocaleString('id-ID')} ${item.uom} setelah transaksi susulan masuk).`
+          );
+          break;
+        }
+      }
 
-      return {
-        day: d.day,
-        dateLabel: d.dateLabel,
-        soFisik: d.so,
-        stokAccurate: d.accurate,
-        qtySelisih: d.selisih,
-        varianceDirection,
-        varianceTypeLabel,
-        dailyAccuracyPercent: acc,
-        isLowestAccuracyDay: Boolean(d.isLowestAccuracyDay),
-        deltaSO: d.deltaSO,
-        deltaAccurate: d.deltaAccurate,
-        matchedSystemMutations,
-        matchedStockCardEntries,
-        stockCardBalance,
-        gapSOvsStockCard,
-        gapAccuratevsStockCard,
-        mutationComparisonResult,
-        potentialDiscrepancyFinding,
-        checkRecommendation,
-        severity,
-      };
-    })
-    .sort(
-      (a, b) =>
-        (b.isLowestAccuracyDay ? 1 : 0) - (a.isLowestAccuracyDay ? 1 : 0) ||
-        a.dailyAccuracyPercent - b.dailyAccuracyPercent ||
-        b.qtySelisih - a.qtySelisih
+      // Deepsearch 3: Lacak di seluruh File Mutasi Sistem & Kartu Stok (termasuk geser tanggal H-3..H+3)
+      const shiftedMutations = itemMutationsAllDays.filter(
+        (m) => m.dayNumber !== d.day && Math.abs(m.dayNumber - d.day) <= 3
+      );
+      if (shiftedMutations.length > 0) {
+        const shiftedMatch = shiftedMutations.find(
+          (m) =>
+            (fisikOutImplied > 0 && Math.abs(m.qtyOut - fisikOutImplied) <= 10) ||
+            Math.abs(m.qtyOut - d.selisih) <= 10 ||
+            Math.abs(m.qtyIn - d.selisih) <= 10
+        );
+        if (shiftedMatch) {
+          const shiftMutMsg = `[Deepsearch File Mutasi Lintas Tanggal]: Ditemukan transaksi pada ${shiftedMatch.date} (In: +${shiftedMatch.qtyIn.toLocaleString('id-ID')}, Out: -${shiftedMatch.qtyOut.toLocaleString('id-ID')} ${item.uom}) yang angkanya berkorelasi dengan selisih tanggal ${d.dateLabel}.`;
+          extendedLogicFindings.push(shiftMutMsg);
+          deepSearchFindings.push(shiftMutMsg);
+        }
+      }
+
+      // Deepsearch 4: Pola Historis Item sepanjang periode aktif
+      deepSearchFindings.push(
+        `[Deepsearch Pola Historis Item "${item.name}"]: Dari ${allActiveDaysForItem.length} hari aktif, item ini mengalami Kriteria FISIK KURANG pada ${totalKurangDays} hari dan Kriteria FISIK LEBIH pada ${totalLebihDays} hari (Akurasi Rata-Rata: ${periodItem.periodAccuracyPercent.toFixed(2)}%).`
+      );
+    } else {
+      deepSearchFindings.push(
+        `[Deepsearch Status]: Pergerakan stok pada ${d.dateLabel} sesuai dengan acuan perhitungan SO sebelumnya.`
+      );
+    }
+
+    // =========================================================================
+    // 5. REKOMENDASI YANG BERSIFAT ARAHAN (DIRECTIVE RECOMMENDATIONS)
+    //    Jangan langsung eksekusi berdasar Nomor kecuali Qty sama persis atau di ujung analisa
+    // =========================================================================
+    const exactQtyMatchTx = matchedSystemMutations.find(
+      (m) =>
+        (m.qtyOut > 0 && m.qtyOut === d.selisih) ||
+        (m.qtyIn > 0 && m.qtyIn === d.selisih) ||
+        (movementGap !== null &&
+          movementGap !== 0 &&
+          (m.qtyOut === Math.abs(movementGap) || m.qtyIn === Math.abs(movementGap)))
     );
+
+    const endNomorReference = exactQtyMatchTx
+      ? `Temuan Ujung Analisa (Qty Sama Persis ${
+          exactQtyMatchTx.qtyOut > 0
+            ? `Out: ${exactQtyMatchTx.qtyOut.toLocaleString('id-ID')}`
+            : `In: ${exactQtyMatchTx.qtyIn.toLocaleString('id-ID')}`
+        } ${item.uom}): Periksa dokumen Nomor ${exactQtyMatchTx.transactionNo} (${exactQtyMatchTx.description}).`
+      : hasUploadedMutasi
+      ? `Ujung Analisa — Setelah rekonsiliasi Total Qty IN-OUT & geser hari, verifikasi nomor dokumen pendukung pada tanggal ini: ${matchedSystemMutations
+          .map((m) => `${m.transactionNo} (In:${m.qtyIn}/Out:${m.qtyOut})`)
+          .join(', ')}.`
+      : '';
+
+    const directiveRecommendations: string[] = [];
+
+    if (majorCriteria === 'FISIK_KURANG') {
+      directiveRecommendations.push(
+        `ARAHAN 1 — TELUSURI PENGELUARAN FISIK (${effectiveShortfallQty.toLocaleString('id-ID')} ${item.uom}): Instruksikan tim gudang memeriksa buku ekspedisi/serah terima barang keluar pada ${d.dateLabel}. Pastikan pengeluaran fisik sebesar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom} sudah memiliki Surat Jalan / DO di Accurate (karena sistem baru mencatat Out ${outToday.toLocaleString('id-ID')} ${item.uom}).`
+      );
+      directiveRecommendations.push(
+        `ARAHAN 2 — CEK CUT-OFF & GESER HARI (${d.dateLabel} ↔ ${nextRecords[0]?.dateLabel || 'H+1'}): Periksa kepada Admin Inventory apakah ada pengiriman/pemakaian fisik pada ${d.dateLabel} yang baru diinput ke Accurate pada ${nextRecords[0]?.dateLabel || 'hari berikutnya'}, atau Penerimaan Barang (RI) yang sudah diinput di Accurate namun fisiknya belum turun ke gudang.`
+      );
+      directiveRecommendations.push(
+        `ARAHAN 3 — VERIFIKASI BARANG RUSAK / LOKASI SIMPAN: Lakukan pengecekan fisik ulang pada area karantina barang rusak/reject/waste serta area penyimpanan sekunder (freezer/chiller cadangan/staging) untuk memastikan tidak ada ${item.name} yang belum di-adjust atau terlewat hitung.`
+      );
+      if (endNomorReference) {
+        directiveRecommendations.push(`ARAHAN 4 — VERIFIKASI DOKUMEN UJUNG: ${endNomorReference}`);
+      }
+    } else if (majorCriteria === 'FISIK_LEBIH') {
+      directiveRecommendations.push(
+        `ARAHAN 1 — CEK BARANG TERTAHAN DI STAGING (+${effectiveSurplusQty.toLocaleString('id-ID')} ${item.uom}): Instruksikan tim gudang memeriksa area muat/staging pada ${d.dateLabel}. Sistem Accurate telah memotong Out ${outToday.toLocaleString('id-ID')} ${item.uom}, sedangkan fisik baru keluar ${fisikOutImplied.toLocaleString('id-ID')} ${item.uom} — pastikan apakah ada barang yang sudah dibuatkan DO namun belum diangkut kurir saat SO berlangsung.`
+      );
+      directiveRecommendations.push(
+        `ARAHAN 2 — AUDIT BARANG MASUK / RETUR BELUM INPUT RI: Periksa surat jalan supplier atau bukti retur dari outlet pada ${prevLabel || 'H-1'} s/d ${d.dateLabel}. Jika fisik barang sudah masuk ke rak dan terhitung saat SO, segera instruksikan Admin memposting Receive Item (RI) di Accurate.`
+      );
+      directiveRecommendations.push(
+        `ARAHAN 3 — KOREKSI DOUBLE INPUT / KURANG KIRIM: Cek daftar DO pada ${d.dateLabel} s/d ${nextRecords[0]?.dateLabel || 'H+1'} untuk memastikan tidak ada pemotongan ganda di Accurate maupun kurang kirim fisik (under-pick) ke cabang.`
+      );
+      if (endNomorReference) {
+        directiveRecommendations.push(`ARAHAN 4 — VERIFIKASI DOKUMEN UJUNG: ${endNomorReference}`);
+      }
+    } else {
+      directiveRecommendations.push(
+        `ARAHAN PERTAHANKAN AKURASI: Hitungan SO pada ${d.dateLabel} telah sesuai dengan acuan SO sebelumnya. Pertahankan disiplin cut-off antara fisik gudang dan input Accurate.`
+      );
+    }
+
+    let mutationComparisonResult = '';
+    let potentialDiscrepancyFinding = '';
+    let checkRecommendation = '';
+
+    if (!hasActivity && !hasUploadedMutasi && !hasUploadedCard) {
+      mutationComparisonResult = `Pada tanggal ${d.dateLabel}, kolom SO dan Accurate di Sheet rekap Daily belum memiliki nilai transaksi.`;
+      potentialDiscrepancyFinding = `Tidak ditemukan selisih pada tanggal ${d.dateLabel}.`;
+      checkRecommendation = `Tidak diperlukan tindakan koreksi pada tanggal ${d.dateLabel}.`;
+    } else if (d.selisih === 0 && !hasUploadedMutasi && !hasUploadedCard) {
+      mutationComparisonResult = `${previousSOReferenceSummary} | ${dateAndQtyMatchSummary}`;
+      potentialDiscrepancyFinding = `Kecocokan Tanggal & Total Qty IN-OUT pada ${d.dateLabel} klop 100% (SO Fisik ${soVal.toLocaleString('id-ID')} = Accurate ${accVal.toLocaleString('id-ID')} ${item.uom}).`;
+      checkRecommendation = directiveRecommendations.join(' ');
+    } else {
+      mutationComparisonResult = `${previousSOReferenceSummary} ${
+        hasUploadedMutasi
+          ? `| Total Mutasi Terupload (${d.dateLabel}): Masuk +${totalMutIn.toLocaleString('id-ID')} ${item.uom}, Keluar -${totalMutOut.toLocaleString('id-ID')} ${item.uom}.`
+          : ''
+      } ${
+        hasUploadedCard
+          ? `| Kartu Stock: Saldo ${stockCardBalance?.toLocaleString('id-ID')} ${item.uom}.`
+          : ''
+      }`;
+
+      potentialDiscrepancyFinding = `${dateAndQtyMatchSummary} ${extendedLogicFindings.join(' ')}`;
+      checkRecommendation = directiveRecommendations.join(' ');
+    }
+
+    const acc = d.dailyAccuracyPercent ?? 100;
+    const severity: VarianceDateMutationComparison['severity'] =
+      d.isLowestAccuracyDay || (acc > 0 && acc < 75) || d.selisih >= 1000
+        ? 'CRITICAL'
+        : (acc > 0 && acc < 92) || d.selisih >= 200
+        ? 'HIGH'
+        : 'MEDIUM';
+
+    return {
+      day: d.day,
+      dateLabel: d.dateLabel,
+      prevDayLabel: prevLabel,
+      prevSO,
+      prevAccurate: prevAcc,
+      inToday,
+      outToday,
+      expectedSOFromPrev,
+      deviationFromExpected,
+      soFisik: d.so,
+      stokAccurate: d.accurate,
+      qtySelisih: d.selisih,
+      varianceDirection,
+      majorCriteria,
+      varianceTypeLabel,
+      dailyAccuracyPercent: acc,
+      isLowestAccuracyDay: Boolean(d.isLowestAccuracyDay),
+      deltaSO: d.deltaSO,
+      deltaAccurate: d.deltaAccurate,
+      previousSOReferenceSummary,
+      criteriaBreakdown,
+      fisikKurangBreakdown,
+      fisikLebihBreakdown,
+      dateAndQtyMatchSummary,
+      extendedLogicFindings,
+      deepSearchFindings,
+      directiveRecommendations,
+      matchedSystemMutations,
+      matchedStockCardEntries,
+      stockCardBalance,
+      gapSOvsStockCard,
+      gapAccuratevsStockCard,
+      mutationComparisonResult,
+      potentialDiscrepancyFinding,
+      checkRecommendation,
+      severity,
+    };
+  });
 }
 
 // Helper konversi angka mutasi yang aman untuk format Indonesia (1.500,00) maupun standar Excel (1500.00)
@@ -1106,15 +1700,54 @@ function parseFlexibleMutationDate(
   };
 }
 
+export function convertExcelSpreadsheetToCsv(buffer: ArrayBuffer): string {
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+  if (!wb.SheetNames || wb.SheetNames.length === 0) return '';
+
+  // Prioritize sheet named "rekap Daily" (case-insensitive), then any sheet containing "rekap" or "daily"
+  let targetSheetName =
+    wb.SheetNames.find((n) => n.trim().toLowerCase() === 'rekap daily') ||
+    wb.SheetNames.find(
+      (n) =>
+        n.toLowerCase().includes('rekap') && n.toLowerCase().includes('daily')
+    ) ||
+    wb.SheetNames.find((n) => n.toLowerCase().includes('rekap'));
+
+  if (!targetSheetName) {
+    // Check which sheet contains "Nama Item" and "Accurate"
+    for (const sName of wb.SheetNames) {
+      const csvCandidate = XLSX.utils.sheet_to_csv(wb.Sheets[sName]);
+      if (/nama\s*item/i.test(csvCandidate) && /accurate/i.test(csvCandidate)) {
+        targetSheetName = sName;
+        break;
+      }
+    }
+  }
+
+  const finalSheet = wb.Sheets[targetSheetName || wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_csv(finalSheet);
+}
+
 // Parser khusus Format File Master Mutasi Barang:
 // Judul Horizontal: Tanggal | Nomor | Deksripsi | Masuk | Keluar (Isian data vertikal)
+// Tanggal, nama item, Nomor, dan deskripsi disesuaikan otomatis oleh isi file
 export function parseSystemMutationBuffer(
   buffer: ArrayBuffer,
   targetItemName: string = 'Semua Item',
-  fallbackDay: number = 1
+  fallbackDay: number = 1,
+  knownItemNames: string[] = [],
+  fileNameHint: string = ''
 ): SystemMutationRecord[] {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const allRecords: SystemMutationRecord[] = [];
+
+  // Cek apakah nama file mengandung nama salah satu item di spreadsheet
+  let inferredFromFileName = targetItemName;
+  if ((!inferredFromFileName || inferredFromFileName === 'Semua Item') && fileNameHint) {
+    const cleanFile = fileNameHint.replace(/[_\-\.]/g, ' ').toLowerCase();
+    const matched = knownItemNames.find((k) => cleanFile.includes(k.toLowerCase()));
+    if (matched) inferredFromFileName = matched;
+  }
 
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName];
@@ -1123,7 +1756,21 @@ export function parseSystemMutationBuffer(
       defval: '',
       raw: true,
     });
-    const parsed = parseSystemMutationRows(rows, targetItemName, fallbackDay);
+    // Cek apakah nama sheet merujuk ke nama item
+    let sheetItemHint = inferredFromFileName;
+    if (!sheetItemHint || sheetItemHint === 'Semua Item') {
+      const matchedSheetItem = knownItemNames.find((k) =>
+        sheetName.toLowerCase().includes(k.toLowerCase())
+      );
+      if (matchedSheetItem) sheetItemHint = matchedSheetItem;
+    }
+
+    const parsed = parseSystemMutationRows(
+      rows,
+      sheetItemHint,
+      fallbackDay,
+      knownItemNames
+    );
     allRecords.push(...parsed);
   }
 
@@ -1133,20 +1780,29 @@ export function parseSystemMutationBuffer(
 export function parseSystemMutationCsvText(
   text: string,
   targetItemName: string = 'Semua Item',
-  fallbackDay: number = 1
+  fallbackDay: number = 1,
+  knownItemNames: string[] = [],
+  fileNameHint: string = ''
 ): SystemMutationRecord[] {
   const cleaned = text.trim();
   if (!cleaned) return [];
+
+  let inferredFromFileName = targetItemName;
+  if ((!inferredFromFileName || inferredFromFileName === 'Semua Item') && fileNameHint) {
+    const cleanFile = fileNameHint.replace(/[_\-\.]/g, ' ').toLowerCase();
+    const matched = knownItemNames.find((k) => cleanFile.includes(k.toLowerCase()));
+    if (matched) inferredFromFileName = matched;
+  }
 
   // Jika teks dipisahkan tab (copy-paste langsung dari Excel) atau titik koma (;)
   const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.some((l) => l.includes('\t'))) {
     const rows = lines.map((l) => l.split('\t').map((c) => c.trim()));
-    return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+    return parseSystemMutationRows(rows, inferredFromFileName, fallbackDay, knownItemNames);
   }
   if (lines.some((l) => l.includes(';') && !l.includes(','))) {
     const rows = lines.map((l) => l.split(';').map((c) => c.trim()));
-    return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+    return parseSystemMutationRows(rows, inferredFromFileName, fallbackDay, knownItemNames);
   }
 
   const wb = XLSX.read(cleaned, { type: 'string', cellDates: true });
@@ -1157,7 +1813,7 @@ export function parseSystemMutationCsvText(
     defval: '',
     raw: true,
   });
-  return parseSystemMutationRows(rows, targetItemName, fallbackDay);
+  return parseSystemMutationRows(rows, inferredFromFileName, fallbackDay, knownItemNames);
 }
 
 function inferTransactionType(nomor: string, deskripsi: string, qtyIn: number, qtyOut: number): string {
@@ -1182,7 +1838,8 @@ function inferTransactionType(nomor: string, deskripsi: string, qtyIn: number, q
 function parseSystemMutationRows(
   rows: any[][],
   targetItemName: string = 'Semua Item',
-  fallbackDay: number = 1
+  fallbackDay: number = 1,
+  knownItemNames: string[] = []
 ): SystemMutationRecord[] {
   if (!rows || rows.length === 0) return [];
 
@@ -1212,6 +1869,25 @@ function parseSystemMutationRows(
     if (matchCount >= 2) {
       headerRowIdx = i;
       break;
+    }
+  }
+
+  // Cek baris di atas headerRowIdx bila ada tertulis Nama Barang / Judul Item di bagian atas file
+  let detectedTopItemName = targetItemName || 'Semua Item';
+  if (headerRowIdx > 0) {
+    for (let i = 0; i < headerRowIdx; i++) {
+      const joinedTop = rows[i]
+        .map((c) => String(c ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+      if (!joinedTop) continue;
+      const matchedKnown = knownItemNames.find((k) =>
+        joinedTop.toLowerCase().includes(k.toLowerCase())
+      );
+      if (matchedKnown) {
+        detectedTopItemName = matchedKnown;
+        break;
+      }
     }
   }
 
@@ -1277,7 +1953,7 @@ function parseSystemMutationRows(
 
   const startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
   const records: SystemMutationRecord[] = [];
-  let currentSectionItemName = targetItemName || 'Semua Item';
+  let currentSectionItemName = detectedTopItemName;
   let lastValidDay = fallbackDay;
   let lastValidFormattedDate = `${String(fallbackDay).padStart(2, '0')} Okt 2026`;
 
@@ -1329,10 +2005,20 @@ function parseSystemMutationRows(
       lastValidFormattedDate = formattedDate;
     }
 
-    const explicitItem =
+    let explicitItem =
       optionalItemCol >= 0 && String(row[optionalItemCol] ?? '').trim()
         ? String(row[optionalItemCol]).trim()
         : currentSectionItemName;
+
+    // Jika explicitItem masih 'Semua Item', coba deteksi nama item dari kolom Deksripsi
+    if ((!explicitItem || explicitItem === 'Semua Item') && rawDesc && knownItemNames.length > 0) {
+      const matchedInDesc = knownItemNames.find((k) =>
+        rawDesc.toLowerCase().includes(k.toLowerCase())
+      );
+      if (matchedInDesc) {
+        explicitItem = matchedInDesc;
+      }
+    }
 
     const balanceAfter =
       optionalBalCol >= 0 && String(row[optionalBalCol] ?? '').trim() !== ''

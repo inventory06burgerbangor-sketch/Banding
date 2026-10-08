@@ -137,27 +137,50 @@ export interface AnalyzedStockCard {
   entries: StockCardEntry[];
 }
 
-// Hasil Banding & Analisa Berdasarkan Search Item (Tanggal Selisih, Jumlah Selisih, Tipe Selisih, Potensi Selisih, Rekomendasi Penyelesaian)
+export interface CriteriaBreakdownDetail {
+  criteriaType: 'FISIK_KURANG' | 'FISIK_LEBIH' | 'SESUAI';
+  criteriaTitle: string;
+  discrepancyQty: number;
+  breakdownCalculations: string[];
+  possibleSources: string[];
+}
+
+// Hasil Banding & Analisa Berdasarkan Search Item (Acuan SO Sebelumnya, 2 Kriteria Besar: Fisik Kurang & Fisik Lebih, Deepsearch, Rekomendasi Arahan)
 export interface VarianceDateMutationComparison {
   day: number;
   dateLabel: string;
+  prevDayLabel?: string | null;
+  prevSO?: number | null;
+  prevAccurate?: number | null;
+  inToday: number;
+  outToday: number;
+  expectedSOFromPrev: number | null; // Hasil SO Seharusnya berdasarkan SO Sebelumnya + In - Out
+  deviationFromExpected: number | null; // SO Aktual - SO Seharusnya
   soFisik: number | null;
   stokAccurate: number | null;
   qtySelisih: number;
   varianceDirection: 'FISIK_KURANG' | 'FISIK_LEBIH' | 'SO_BELUM_INPUT' | 'SISTEM_MINUS' | 'SEIMBANG';
+  majorCriteria: 'FISIK_KURANG' | 'FISIK_LEBIH' | 'SESUAI';
   varianceTypeLabel: string; // Tipe Selisih
   dailyAccuracyPercent: number;
   isLowestAccuracyDay: boolean;
   deltaSO: number | null;
   deltaAccurate: number | null;
+  previousSOReferenceSummary: string; // Acuan Hitungan SO Sebelumnya (Tanpa teks SO tgl 1 - Data Out tgl 2 = SO tgl 2)
+  criteriaBreakdown: CriteriaBreakdownDetail; // Breakdown spesifik Kriteria Fisik Kurang / Fisik Lebih + Kemungkinan Sumber Selisih
+  fisikKurangBreakdown: CriteriaBreakdownDetail | null;
+  fisikLebihBreakdown: CriteriaBreakdownDetail | null;
+  dateAndQtyMatchSummary: string; // Kecocokan Tanggal & Total Qty IN - OUT
+  extendedLogicFindings: string[]; // Fisik keluar tanpa Accurate, Accurate keluar fisik tidak, Geser beberapa hari
+  deepSearchFindings: string[]; // Hasil Deepsearch lintas tanggal, mutasi, pola selisih & geser hari
+  directiveRecommendations: string[]; // Rekomendasi yang bersifat arahan (langkah instruktif)
   matchedSystemMutations: SystemMutationRecord[];
   matchedStockCardEntries: StockCardEntry[];
   stockCardBalance: number | null;
   gapSOvsStockCard: number | null;
   gapAccuratevsStockCard: number | null;
   mutationComparisonResult: string; // Hasil Banding dengan Data Mutasi & Kartu Stok
-  potentialDiscrepancyFinding: string; // Potensi Selisih berdasar Analisa Tanggal, Jenis Transaksi, dan Jumlah
-  checkRecommendation: string; // Rekomendasi Penyelesaian
+  potentialDiscrepancyFinding: string; // Potensi Selisih
+  checkRecommendation: string; // Ringkasan Rekomendasi Arahan
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
 }
-

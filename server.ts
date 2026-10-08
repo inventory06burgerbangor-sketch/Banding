@@ -21,6 +21,98 @@ const ai = new GoogleGenAI({
   },
 });
 
+app.post('/api/fetch-spreadsheet', async (req, res) => {
+  try {
+    const { url, sheetName = 'rekap Daily' } = req.body || {};
+    if (!url || typeof url !== 'string') {
+      res.status(400).json({ error: 'URL Spreadsheet tidak valid.' });
+      return;
+    }
+
+    const rawUrl = url.trim();
+    const match = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    const cacheBuster = Date.now();
+    const candidateUrls: string[] = [];
+
+    if (match) {
+      const docId = match[1];
+      const gidMatch = rawUrl.match(/[?&#]gid=([0-9]+)/);
+      // Priority 1: If explicit non-zero gid is in the link, try export with that gid AND try 'rekap Daily' sheet name
+      if (gidMatch && gidMatch[1] !== '0') {
+        candidateUrls.push(
+          `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv&gid=${gidMatch[1]}&t=${cacheBuster}`
+        );
+      }
+      // Priority 2: Target 'rekap Daily' (or user-provided sheetName) via Google Sheets gviz CSV endpoint
+      const sheetCandidates = Array.from(
+        new Set([sheetName, 'rekap Daily', 'Rekap Daily', 'REKAP DAILY', 'Rekap daily'])
+      );
+      for (const sName of sheetCandidates) {
+        candidateUrls.push(
+          `https://docs.google.com/spreadsheets/d/${docId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(
+            sName
+          )}&t=${cacheBuster}`
+        );
+      }
+      // Priority 3: Fallback to default gid=0 export
+      const fallbackGid = gidMatch ? gidMatch[1] : '0';
+      candidateUrls.push(
+        `https://docs.google.com/spreadsheets/d/${docId}/export?format=csv&gid=${fallbackGid}&t=${cacheBuster}`
+      );
+    } else {
+      candidateUrls.push(rawUrl);
+    }
+
+    let bestCsvText = '';
+    let resolvedUrl = candidateUrls[0];
+    let lastStatus = 500;
+
+    for (const candidate of candidateUrls) {
+      try {
+        const response = await fetch(candidate, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; BangorInventorySync/2.0)',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            Pragma: 'no-cache',
+          },
+        });
+        lastStatus = response.status;
+        if (!response.ok) continue;
+
+        const text = await response.text();
+        // Verify it's not an HTML login page and contains valid CSV rows
+        if (
+          text &&
+          !text.trim().toLowerCase().startsWith('<!doctype html') &&
+          !text.trim().toLowerCase().startsWith('<html')
+        ) {
+          bestCsvText = text;
+          resolvedUrl = candidate;
+          // Prefer sheet that contains 'Nama Item' or 'Beef Patty' or 'Accurate'
+          if (/nama\s*item|beef\s*patty|accurate/i.test(text)) {
+            break;
+          }
+        }
+      } catch {
+        // Continue trying next candidate URL
+      }
+    }
+
+    if (!bestCsvText) {
+      res.status(lastStatus || 400).json({
+        error: `Gagal mengambil data Sheet "rekap Daily" (Status ${lastStatus}). Pastikan akses Google Sheet diset ke "Anyone with the link can view".`,
+      });
+      return;
+    }
+
+    res.json({ csvText: bestCsvText, resolvedUrl, sheetName });
+  } catch (err: any) {
+    res.status(500).json({
+      error: err?.message || 'Gagal menyinkronkan data dari URL Spreadsheet.',
+    });
+  }
+});
+
 app.post('/api/analyze-stock-card', async (req, res) => {
   try {
     const { imageBase64, mimeType, itemNameHint } = req.body || {};
